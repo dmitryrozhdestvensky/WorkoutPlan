@@ -30,6 +30,10 @@ def init():
 CREATE TABLE IF NOT EXISTS exercises(id INTEGER PRIMARY KEY,name TEXT,instruction TEXT,media TEXT);
 CREATE TABLE IF NOT EXISTS workouts(id INTEGER PRIMARY KEY,title TEXT,client INTEGER,coach INTEGER,items TEXT);
 CREATE TABLE IF NOT EXISTS results(workout INTEGER,client INTEGER,payload TEXT,updated TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(workout,client));''')
+        user_columns = {row['name'] for row in c.execute('PRAGMA table_info(users)')}
+        for field in ('surname', 'given_name', 'patronymic', 'phone', 'profile_media'):
+            if field not in user_columns:
+                c.execute(f"ALTER TABLE users ADD COLUMN {field} TEXT NOT NULL DEFAULT ''")
         columns = {row['name'] for row in c.execute('PRAGMA table_info(workouts)')}
         if 'details' not in columns:
             c.execute("ALTER TABLE workouts ADD COLUMN details TEXT NOT NULL DEFAULT '{}'")
@@ -110,7 +114,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not u or not secrets.compare_digest(u['hash'],password(body.get('password',''),u['salt'])):return self.respond(401,{'error':'Неверная почта или пароль'})
                     t=secrets.token_hex(32);SESSIONS[t]=u['id'];return self.respond(200,{'ok':True},f'session={t}; HttpOnly; SameSite=Strict; Path=/')
                 if not uid:return self.respond(401,{'error':'Войдите в аккаунт'})
-                u=c.execute('SELECT id,name,email,role,coach FROM users WHERE id=?',(uid,)).fetchone();role=u['role']
+                u=c.execute('SELECT id,name,email,role,coach,surname,given_name,patronymic,phone,profile_media FROM users WHERE id=?',(uid,)).fetchone();role=u['role']
                 if self.path=='/api/logout':
                     SESSIONS.pop(token.value,None);return self.respond(200,{'ok':True},'session=; Max-Age=0; Path=/')
                 if self.path=='/api/state':
@@ -120,7 +124,63 @@ class Handler(BaseHTTPRequestHandler):
                         w['details']=json.loads(w['details']); w['items']=json.loads(w['items']); r=c.execute('SELECT payload,updated FROM results WHERE workout=? AND client=?',(w['id'],w['client'])).fetchone();w['result']=json.loads(r['payload']) if r else {};w['updated']=r['updated'] if r else None
                     return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT * FROM exercises')],workouts=workouts))
                 if method!='POST':return self.respond(404,{'error':'Не найдено'})
-                if self.path=='/api/exercises' and role=='admin':
+                if self.path=='/api/profile-media' and role=='coach':
+                    gallery = body['gallery']
+                    main = body.get('main')
+                    if len(gallery)>20 or any(item['type']!='photo' or not re.fullmatch(r'/uploads/[a-f0-9]{32}[.](jpg|png|webp)',item['url']) for item in gallery):
+                        raise ValueError('Invalid photos')
+                    if main is not None and (type(main) is not int or not 0 <= main < len(gallery)):
+                        raise ValueError('Invalid main photo')
+                    media = {'gallery':gallery,'cover':gallery[main]['url'] if main is not None else ''}
+                    c.execute('UPDATE users SET profile_media=? WHERE id=?',(json.dumps(media),uid))
+                    c.commit()
+                    return self.respond(200, {'ok':True})
+                if self.path=='/api/coach-profile' and role=='coach':
+                    parts = [body[key].strip() for key in ('surname','given_name','patronymic')]
+                    if not all(parts[:2]) or any(len(part)>50 for part in parts):
+                        raise ValueError('Invalid profile name')
+                    email = body.get('email', u['email']).strip().lower()
+                    phone = body.get('phone', u['phone']).strip()
+                    if len(email)>254 or not re.fullmatch(r'[^@\s]+@[^@\s]+[.][^@\s]+', email):
+                        raise ValueError('Введите корректный email')
+                    if phone and not re.fullmatch(r'[+][1-9][0-9]{6,14}', phone):
+                        raise ValueError('Введите телефон в международном формате')
+                    if c.execute('SELECT 1 FROM users WHERE lower(email)=? AND id<>?', (email,uid)).fetchone():
+                        return self.respond(409, {'error':'Эта почта уже используется'})
+                    c.execute('UPDATE users SET surname=?,given_name=?,patronymic=?,name=?,email=?,phone=? WHERE id=?',
+                              (*parts, ' '.join(filter(None,parts)), email, phone, uid))
+                    c.commit()
+                    return self.respond(200, {'ok':True})
+                if self.path=='/api/client-create' and role=='coach':
+                    surname = body['surname'].strip()
+                    given_name = body['given_name'].strip()
+                    patronymic = body.get('patronymic','').strip()
+                    phone = body['phone'].strip()
+                    if not surname or not given_name or any(len(part)>50 for part in (surname,given_name,patronymic)):
+                        raise ValueError('Invalid client name')
+                    if not re.fullmatch(r'[+0-9() .-]{7,32}', phone) or not 7 <= len(re.sub(r'[^0-9]', '', phone)) <= 15:
+                        raise ValueError('Invalid mobile phone')
+                    name = ' '.join(filter(None, (surname,given_name,patronymic)))
+                    email = body.get('email','').strip().lower() or f'athlete-{secrets.token_hex(8)}@login.invalid'
+                    if not 1 <= len(name) <= 150 or not re.fullmatch(r'[^@\s]+@[^@\s]+[.][^@\s]+', email):
+                        raise ValueError('Invalid client name or email')
+                    if c.execute('SELECT 1 FROM users WHERE lower(email)=?', (email,)).fetchone():
+                        return self.respond(409, {'error':'Email already registered'})
+                    temporary_password = secrets.token_urlsafe(18)
+                    salt = secrets.token_hex(16)
+                    c.execute('INSERT INTO users(name,email,role,salt,hash,coach,surname,given_name,patronymic,phone) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                              (name,email,'user',salt,password(temporary_password,salt),uid,surname,given_name,patronymic,phone))
+                    c.commit()
+                    return self.respond(201, {'email':email,'password':temporary_password})
+                if self.path=='/api/client-search' and role=='coach':
+                    query = body['query'].strip().casefold()
+                    users = [dict(row) for row in c.execute("SELECT id,name,email FROM users WHERE role='user' AND coach IS NULL") if len(query)>=2 and any(query in row[key].casefold() for key in ('name','email'))]
+                    return self.respond(200, users[:30])
+                if self.path=='/api/client-link' and role=='coach':
+                    updated = c.execute("UPDATE users SET coach=? WHERE id=? AND role='user' AND coach IS NULL", (uid,body['id']))
+                    if not updated.rowcount:
+                        return self.respond(409, {'error':'Client unavailable'})
+                elif self.path=='/api/exercises' and role=='admin':
                     name=body['name'].strip(); media=body.get('media','')
                     if not name or (media and not media.startswith('https://')):raise ValueError('Укажите название и HTTPS-ссылку на медиа')
                     c.execute('INSERT INTO exercises(name,instruction,media) VALUES(?,?,?)',(name,body.get('instruction',''),media))
@@ -133,7 +193,17 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(404, {'error':'Template unavailable'})
                     details = json.loads(row['details'])
                     gallery = details.get('gallery', [])
-                    if 'title' in body:
+                    if 'items' in body:
+                        items = body['items']
+                        if not 1 <= len(items) <= 30:
+                            raise ValueError('Add 1 to 30 exercises')
+                        for item in items:
+                            if not c.execute('SELECT id FROM exercises WHERE id=?', (item['exercise'],)).fetchone() or not 1 <= int(item['sets']) <= 20 or not isinstance(item['reps'], str) or not item['reps'].strip():
+                                raise ValueError('Invalid exercise or sets')
+                            if item.get('media') and not item['media'].startswith('https://'):
+                                raise ValueError('HTTPS media URL required')
+                        c.execute('UPDATE workouts SET items=? WHERE id=?', (json.dumps(items),body['id']))
+                    elif 'title' in body:
                         title = body['title'].strip()
                         if not 1 <= len(title) <= 100:
                             raise ValueError('Invalid title')
@@ -154,6 +224,23 @@ class Handler(BaseHTTPRequestHandler):
                         if not template:
                             raise ValueError('Шаблон недоступен')
                         body.update(title=template['title'], items=json.loads(template['items']), details=json.loads(template['details']))
+                    if 'assignments' in body:
+                        from datetime import date
+                        assignments = body['assignments']
+                        if not body.get('template') or not assignments:
+                            raise ValueError('Select clients')
+                        seen = set()
+                        for assignment in assignments:
+                            client_id = int(assignment['client'])
+                            start = date.fromisoformat(assignment['from'])
+                            end = date.fromisoformat(assignment['to'])
+                            if start > end or client_id in seen or not c.execute("SELECT 1 FROM users WHERE id=? AND coach=? AND role='user'",(client_id,uid)).fetchone():
+                                raise ValueError('Check client and assignment dates')
+                            seen.add(client_id)
+                            details = {**body['details'], 'period': {'from':start.isoformat(),'to':end.isoformat()}}
+                            c.execute('INSERT INTO workouts(title,client,coach,items,details) VALUES(?,?,?,?,?)',
+                                      (body['title'],client_id,uid,json.dumps(body['items']),json.dumps(details)))
+                        return self.respond(200, {'ok':True})
                     client_id = body.get('client')
                     client=c.execute('SELECT id FROM users WHERE id=? AND coach=?',(int(client_id),uid)).fetchone() if client_id else None
                     if client_id and not client:raise ValueError('Клиент недоступен')
