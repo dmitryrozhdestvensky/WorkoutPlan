@@ -14,3 +14,18 @@
 .media-preview span { position: absolute; top: 6px; left: 6px; padding: 3px 6px; background: #172f25; color: white; border-radius: 4px; pointer-events: none; }
 #manage-exercises { margin-top: 20px; }
 .iti { display: block; width: 100%; }
+#profile-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+#profile-form legend { padding: 0; margin-bottom: .5rem; font-size: 1.5rem; font-weight: 500; }
+#profile-form .mb-3 { margin-bottom: 1rem; }
+#app .form-label { display: block; margin-bottom: .5rem; font-size: 1rem; font-weight: 400; }
+#app .form-control { display: block; font-size: 1rem; line-height: 1.5; }
+
+#profile-form .form-label { margin-top: 0; }
+#app td .form-control { font-size: .875rem; }
+.clients-table { overflow-x: auto; border: 1px solid #ccd5c8; border-radius: 8px; }
+.clients-table .table { min-width: 34rem; margin: 0; background: #fff; }
+.clients-table .table > :not(caption) > * > * { padding: .75rem; vertical-align: top; border-bottom: 1px solid #ccd5c8; }
+.clients-table thead th { font-weight: 600; }
+.clients-table .table-striped > tbody > tr:nth-of-type(odd) > * { background: #edf1e8; }
+.clients-table tbody tr:last-child > * { border-bottom: 0; }
+.clients-table ul { margin: 0; padding-inline-start: 1.25rem; }
