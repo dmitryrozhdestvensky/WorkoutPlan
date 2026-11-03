@@ -1,4 +1,4 @@
-import json, sqlite3, secrets, hashlib, os
+import re, json, sqlite3, secrets, hashlib, os
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -55,10 +55,49 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers();self.wfile.write(raw)
     def do_GET(self):
         if self.path.startswith('/api/'):return self.api('GET')
+        if re.fullmatch(r'/uploads/[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', self.path):
+            path = DB.parent / 'uploads' / self.path.split('/')[-1]
+            if not path.is_file():
+                return self.send_error(404)
+            import mimetypes, shutil
+            self.send_response(200)
+            self.send_header('Content-Type', mimetypes.guess_type(path.name)[0])
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('Content-Length', str(path.stat().st_size))
+            self.end_headers()
+            with path.open('rb') as source:
+                shutil.copyfileobj(source, self.wfile)
+            return
         path=ROOT/'web'/('index.html' if self.path=='/' else self.path.lstrip('/'))
         if path.parent != ROOT/'web' or not path.is_file():self.send_error(404);return
         self.send_response(200);self.send_header('Content-Type',{'html':'text/html; charset=utf-8','css':'text/css','js':'text/javascript; charset=utf-8'}.get(path.suffix[1:],'text/plain'));self.end_headers();self.wfile.write(path.read_bytes())
-    def do_POST(self):self.api('POST')
+    def do_POST(self):
+        if self.path != '/api/upload':
+            return self.api('POST')
+        cookie = SimpleCookie(self.headers.get('Cookie', '')).get('session')
+        uid = SESSIONS.get(cookie.value) if cookie else None
+        with connect() as db:
+            user = db.execute('SELECT role FROM users WHERE id=?', (uid,)).fetchone()
+        if not user or user['role'] != 'coach':
+            return self.respond(403, {'error': 'Upload forbidden'})
+        suffix = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp',
+                  'video/mp4':'mp4','video/webm':'webm'}.get(self.headers.get_content_type())
+        size = int(self.headers.get('Content-Length', '0'))
+        if not suffix or not 0 < size <= 50 * 1024 * 1024:
+            return self.respond(400, {'error': 'Unsupported file or size over 50 MB'})
+        raw = self.rfile.read(size)
+        valid = {'jpg':raw.startswith(bytes.fromhex('ffd8ff')),
+                 'png':raw.startswith(bytes.fromhex('89504e470d0a1a0a')),
+                 'webp':raw[:4]==b'RIFF' and raw[8:12]==b'WEBP',
+                 'mp4':raw[4:8]==b'ftyp',
+                 'webm':raw.startswith(bytes.fromhex('1a45dfa3'))}
+        if len(raw) != size or not valid[suffix]:
+            return self.respond(400, {'error': 'Invalid file content'})
+        folder = DB.parent / 'uploads'
+        folder.mkdir(exist_ok=True)
+        name = secrets.token_hex(16) + '.' + suffix
+        (folder / name).write_bytes(raw)
+        return self.respond(200, {'url': '/uploads/' + name})
     def api(self,method):
         try:
             size=int(self.headers.get('Content-Length',0))
@@ -88,6 +127,27 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path=='/api/trainers' and role=='admin':
                     if len(body['password'])<8:raise ValueError('Пароль должен содержать не менее 8 символов')
                     salt=secrets.token_hex(16);c.execute('INSERT INTO users(name,email,role,salt,hash) VALUES(?,?,?,?,?)',(body['name'],body['email'],'coach',salt,password(body['password'],salt)))
+                elif self.path=='/api/template-media' and role=='coach':
+                    row = c.execute('SELECT details FROM workouts WHERE id=? AND coach=? AND client IS NULL', (body['id'], uid)).fetchone()
+                    if not row:
+                        return self.respond(404, {'error':'Template unavailable'})
+                    details = json.loads(row['details'])
+                    gallery = details.get('gallery', [])
+                    if 'title' in body:
+                        title = body['title'].strip()
+                        if not 1 <= len(title) <= 100:
+                            raise ValueError('Invalid title')
+                        details['description'] = body['description']
+                        c.execute('UPDATE workouts SET title=?,details=? WHERE id=?', (title,json.dumps(details),body['id']))
+                    else:
+                        gallery = body['gallery']
+                        main = body.get('main')
+                        if len(gallery)>20 or any(m['type'] not in ('photo','video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)',m['url'])) for m in gallery):
+                            raise ValueError('Invalid gallery')
+                        if main is not None and (type(main) is not int or not 0 <= main < len(gallery)):
+                            raise ValueError('Invalid main media')
+                        details.update(gallery=gallery,cover=gallery[main]['url'] if main is not None else '')
+                        c.execute('UPDATE workouts SET details=? WHERE id=?', (json.dumps(details),body['id']))
                 elif self.path=='/api/workouts' and role=='coach':
                     if body.get('template'):
                         template = c.execute('SELECT * FROM workouts WHERE id=? AND coach=? AND client IS NULL', (body['template'], uid)).fetchone()
@@ -108,9 +168,9 @@ class Handler(BaseHTTPRequestHandler):
                     cover = details.get('cover', '')
                     if not title or len(title) > 100:
                         raise ValueError('Название должно содержать от 1 до 100 символов')
-                    if len(gallery) > 20 or any(m['type'] not in ('photo', 'video') or not m['url'].startswith('https://') for m in gallery):
+                    if len(gallery) > 20 or any(m['type'] not in ('photo', 'video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', m['url'])) for m in gallery):
                         raise ValueError('Добавьте до 20 фото или видео по HTTPS-ссылкам')
-                    if cover and not any(m['type']=='photo' and m['url']==cover for m in gallery):
+                    if cover and not any(m['url']==cover for m in gallery):
                         raise ValueError('Выберите главное фото из галереи')
                     c.execute('INSERT INTO workouts(title,client,coach,items,details) VALUES(?,?,?,?,?)',
                               (title, client['id'] if client else None, uid, json.dumps(items), json.dumps(details)))
