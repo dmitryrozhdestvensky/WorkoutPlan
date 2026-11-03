@@ -37,6 +37,12 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(call('state',cookie=coach)[1]['workouts'][0]['result'],result)
                 self.assertEqual(call('exercises',{'name':'New','instruction':'Test','media':''},admin)[0]['code'],200)
                 self.assertEqual(len(call('state',cookie=user)[1]['exercises']),13)
+                item = {'exercise':1,'sets':3,'reps':'8'}
+                self.assertEqual(call('workouts', {'title':'Before','items':[item]},coach)[0]['code'],200)
+                template = next(w for w in call('state',cookie=coach)[1]['workouts'] if w['client'] is None)
+                self.assertEqual(call('template-media', {'id':template['id'],'title':'After','description':'Line one\nLine two'},coach)[0]['code'],200)
+                saved = next(w for w in call('state',cookie=coach)[1]['workouts'] if w['id']==template['id'])
+                self.assertEqual((saved['title'],saved['details']['description']), ('After','Line one\nLine two'))
                 with server.connect() as db:
                     self.assertEqual(json.loads(db.execute('SELECT payload FROM results').fetchone()[0]),result)
             finally:
