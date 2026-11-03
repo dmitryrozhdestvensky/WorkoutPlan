@@ -118,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path=='/api/logout':
                     SESSIONS.pop(token.value,None);return self.respond(200,{'ok':True},'session=; Max-Age=0; Path=/')
                 if self.path=='/api/state':
-                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach FROM users') if role=='admin' or x['id']==uid or (role=='coach' and x['coach']==uid)]
+                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach,phone FROM users') if role=='admin' or x['id']==uid or (role=='coach' and x['coach']==uid)]
                     workouts=[dict(x) for x in c.execute('SELECT * FROM workouts') if role=='admin' or x['client']==uid or (role=='coach' and x['coach']==uid)]
                     for w in workouts:
                         w['details']=json.loads(w['details']); w['items']=json.loads(w['items']); r=c.execute('SELECT payload,updated FROM results WHERE workout=? AND client=?',(w['id'],w['client'])).fetchone();w['result']=json.loads(r['payload']) if r else {};w['updated']=r['updated'] if r else None
