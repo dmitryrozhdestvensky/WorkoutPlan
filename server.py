@@ -53,14 +53,25 @@ CREATE TABLE IF NOT EXISTS results(workout INTEGER,client INTEGER,payload TEXT,u
             c.execute('INSERT INTO workouts(title,client,coach,items) VALUES(?,?,?,?)',(f'Неделя 1 · Тренировка {day+1}',1,2,json.dumps(items)))
 
 class Handler(BaseHTTPRequestHandler):
+    def send_error(self, code, message=None, explain=None):
+        if code != 404:
+            return super().send_error(code, message, explain)
+        raw = (ROOT / 'web' / '404.html').read_bytes()
+        self.send_response(404)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
     def respond(self,code,data,cookie=None):
         raw=json.dumps(data,ensure_ascii=False).encode(); self.send_response(code); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Cache-Control','no-store')
         if cookie:self.send_header('Set-Cookie',cookie)
         self.end_headers();self.wfile.write(raw)
     def do_GET(self):
+        from urllib.parse import urlsplit
+        self.path = urlsplit(self.path).path
         if self.path.startswith('/api/'):return self.api('GET')
-        if re.fullmatch(r'/uploads/[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', self.path):
-            path = DB.parent / 'uploads' / self.path.split('/')[-1]
+        if re.fullmatch(r'/uploads/(?:(?:coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', self.path):
+            path = DB.parent / 'uploads' / self.path.removeprefix('/uploads/')
             if not path.is_file():
                 return self.send_error(404)
             import mimetypes, shutil
@@ -82,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
         uid = SESSIONS.get(cookie.value) if cookie else None
         with connect() as db:
             user = db.execute('SELECT role FROM users WHERE id=?', (uid,)).fetchone()
-        if not user or user['role'] != 'coach':
+        if not user or user['role'] not in ('coach','user','admin'):
             return self.respond(403, {'error': 'Upload forbidden'})
         suffix = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp',
                   'video/mp4':'mp4','video/webm':'webm'}.get(self.headers.get_content_type())
@@ -97,11 +108,14 @@ class Handler(BaseHTTPRequestHandler):
                  'webm':raw.startswith(bytes.fromhex('1a45dfa3'))}
         if len(raw) != size or not valid[suffix]:
             return self.respond(400, {'error': 'Invalid file content'})
-        folder = DB.parent / 'uploads'
-        folder.mkdir(exist_ok=True)
+        from datetime import datetime, timedelta, timezone
+        day = datetime.now(timezone(timedelta(hours=3))).strftime('%Y/%m/%d')
+        relative_folder = f"{user['role']}/{day}"
+        folder = DB.parent / 'uploads' / relative_folder
+        folder.mkdir(parents=True, exist_ok=True)
         name = secrets.token_hex(16) + '.' + suffix
         (folder / name).write_bytes(raw)
-        return self.respond(200, {'url': '/uploads/' + name})
+        return self.respond(200, {'url': f'/uploads/{relative_folder}/{name}'})
     def api(self,method):
         try:
             size=int(self.headers.get('Content-Length',0))
@@ -118,40 +132,56 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path=='/api/logout':
                     SESSIONS.pop(token.value,None);return self.respond(200,{'ok':True},'session=; Max-Age=0; Path=/')
                 if self.path=='/api/state':
-                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach,phone FROM users') if role=='admin' or x['id']==uid or (role=='coach' and x['coach']==uid)]
+                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach,phone,surname,given_name,patronymic,profile_media FROM users') if role=='admin' or x['id']==uid or (role=='coach' and x['coach']==uid)]
                     workouts=[dict(x) for x in c.execute('SELECT * FROM workouts') if role=='admin' or x['client']==uid or (role=='coach' and x['coach']==uid)]
                     for w in workouts:
                         w['details']=json.loads(w['details']); w['items']=json.loads(w['items']); r=c.execute('SELECT payload,updated FROM results WHERE workout=? AND client=?',(w['id'],w['client'])).fetchone();w['result']=json.loads(r['payload']) if r else {};w['updated']=r['updated'] if r else None
                     return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT * FROM exercises')],workouts=workouts))
                 if method!='POST':return self.respond(404,{'error':'Не найдено'})
-                if self.path=='/api/profile-media' and role=='coach':
+                if self.path=='/api/profile-media' and role in ('coach','user','admin'):
+                    target_uid = uid
+                    if role == 'admin':
+                        target_uid = int(body['coach'])
+                        if not c.execute("SELECT 1 FROM users WHERE id=? AND role='coach'",(target_uid,)).fetchone():
+                            return self.respond(404, {'error':'Coach unavailable'})
                     gallery = body['gallery']
                     main = body.get('main')
-                    if len(gallery)>20 or any(item['type']!='photo' or not re.fullmatch(r'/uploads/[a-f0-9]{32}[.](jpg|png|webp)',item['url']) for item in gallery):
+                    if len(gallery)>20 or any(item['type']!='photo' or not re.fullmatch(r'/uploads/(?:(?:coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp)',item['url']) for item in gallery):
                         raise ValueError('Invalid photos')
                     if main is not None and (type(main) is not int or not 0 <= main < len(gallery)):
                         raise ValueError('Invalid main photo')
                     media = {'gallery':gallery,'cover':gallery[main]['url'] if main is not None else ''}
-                    c.execute('UPDATE users SET profile_media=? WHERE id=?',(json.dumps(media),uid))
+                    c.execute('UPDATE users SET profile_media=? WHERE id=?',(json.dumps(media),target_uid))
                     c.commit()
                     return self.respond(200, {'ok':True})
-                if self.path=='/api/coach-profile' and role=='coach':
+                if self.path=='/api/coach-profile' and role in ('coach','user','admin'):
+                    target_uid = uid
+                    if role == 'admin':
+                        target_uid = int(body['coach'])
+                        if not c.execute("SELECT 1 FROM users WHERE id=? AND role='coach'",(target_uid,)).fetchone():
+                            return self.respond(404, {'error':'Coach unavailable'})
                     parts = [body[key].strip() for key in ('surname','given_name','patronymic')]
                     if not all(parts[:2]) or any(len(part)>50 for part in parts):
                         raise ValueError('Invalid profile name')
-                    email = body.get('email', u['email']).strip().lower()
-                    phone = body.get('phone', u['phone']).strip()
+                    target = c.execute('SELECT email,phone FROM users WHERE id=?',(target_uid,)).fetchone()
+                    email = body.get('email', target['email']).strip().lower() or target['email']
+                    phone = body.get('phone', target['phone']).strip()
                     if len(email)>254 or not re.fullmatch(r'[^@\s]+@[^@\s]+[.][^@\s]+', email):
                         raise ValueError('Введите корректный email')
                     if phone and not re.fullmatch(r'[+][1-9][0-9]{6,14}', phone):
                         raise ValueError('Введите телефон в международном формате')
-                    if c.execute('SELECT 1 FROM users WHERE lower(email)=? AND id<>?', (email,uid)).fetchone():
+                    if c.execute('SELECT 1 FROM users WHERE lower(email)=? AND id<>?', (email,target_uid)).fetchone():
                         return self.respond(409, {'error':'Эта почта уже используется'})
                     c.execute('UPDATE users SET surname=?,given_name=?,patronymic=?,name=?,email=?,phone=? WHERE id=?',
-                              (*parts, ' '.join(filter(None,parts)), email, phone, uid))
+                              (*parts, ' '.join(filter(None,parts)), email, phone, target_uid))
                     c.commit()
                     return self.respond(200, {'ok':True})
-                if self.path=='/api/client-create' and role=='coach':
+                if (self.path in ('/api/client-create','/api/client-edit') and role=='coach') or (self.path=='/api/coach-create' and role=='admin'):
+                    account_role = 'coach' if self.path=='/api/coach-create' else 'user'
+                    editing = self.path=='/api/client-edit'
+                    client_id = body.get('id') if editing else None
+                    if editing and not c.execute("SELECT 1 FROM users WHERE id=? AND coach=? AND role='user'",(client_id,uid)).fetchone():
+                        return self.respond(404, {'error':'Client unavailable'})
                     surname = body['surname'].strip()
                     given_name = body['given_name'].strip()
                     patronymic = body.get('patronymic','').strip()
@@ -161,20 +191,26 @@ class Handler(BaseHTTPRequestHandler):
                     if not re.fullmatch(r'[+0-9() .-]{7,32}', phone) or not 7 <= len(re.sub(r'[^0-9]', '', phone)) <= 15:
                         raise ValueError('Invalid mobile phone')
                     name = ' '.join(filter(None, (surname,given_name,patronymic)))
-                    email = body.get('email','').strip().lower() or f'athlete-{secrets.token_hex(8)}@login.invalid'
+                    email = body.get('email','').strip().lower() or (c.execute('SELECT email FROM users WHERE id=?',(client_id,)).fetchone()[0] if editing else f'athlete-{secrets.token_hex(8)}@login.invalid')
                     if not 1 <= len(name) <= 150 or not re.fullmatch(r'[^@\s]+@[^@\s]+[.][^@\s]+', email):
                         raise ValueError('Invalid client name or email')
-                    if c.execute('SELECT 1 FROM users WHERE lower(email)=?', (email,)).fetchone():
+                    if c.execute('SELECT 1 FROM users WHERE lower(email)=? AND id IS NOT ?', (email,client_id)).fetchone():
                         return self.respond(409, {'error':'Email already registered'})
+                    if editing:
+                        c.execute('UPDATE users SET name=?,email=?,surname=?,given_name=?,patronymic=?,phone=? WHERE id=? AND coach=?',
+                                  (name,email,surname,given_name,patronymic,phone,client_id,uid))
+                        c.commit()
+                        return self.respond(200, {'email':email})
                     temporary_password = secrets.token_urlsafe(18)
                     salt = secrets.token_hex(16)
                     c.execute('INSERT INTO users(name,email,role,salt,hash,coach,surname,given_name,patronymic,phone) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                              (name,email,'user',salt,password(temporary_password,salt),uid,surname,given_name,patronymic,phone))
+                              (name,email,account_role,salt,password(temporary_password,salt),uid if account_role=='user' else None,surname,given_name,patronymic,phone))
+                    client_id = c.execute('SELECT last_insert_rowid()').fetchone()[0]
                     c.commit()
-                    return self.respond(201, {'email':email,'password':temporary_password})
+                    return self.respond(201, {'id':client_id,'email':email,'password':temporary_password})
                 if self.path=='/api/client-search' and role=='coach':
                     query = body['query'].strip().casefold()
-                    users = [dict(row) for row in c.execute("SELECT id,name,email FROM users WHERE role='user' AND coach IS NULL") if len(query)>=2 and any(query in row[key].casefold() for key in ('name','email'))]
+                    users = [dict(row) for row in c.execute("SELECT id,name,email,coach IS NULL AS available FROM users WHERE role='user'") if len(query)>=3 and any(query in row[key].casefold() for key in ('name','email'))]
                     return self.respond(200, users[:30])
                 if self.path=='/api/client-link' and role=='coach':
                     updated = c.execute("UPDATE users SET coach=? WHERE id=? AND role='user' AND coach IS NULL", (uid,body['id']))
@@ -212,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         gallery = body['gallery']
                         main = body.get('main')
-                        if len(gallery)>20 or any(m['type'] not in ('photo','video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)',m['url'])) for m in gallery):
+                        if len(gallery)>20 or any(m['type'] not in ('photo','video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/(?:(?:coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)',m['url'])) for m in gallery):
                             raise ValueError('Invalid gallery')
                         if main is not None and (type(main) is not int or not 0 <= main < len(gallery)):
                             raise ValueError('Invalid main media')
@@ -255,7 +291,7 @@ class Handler(BaseHTTPRequestHandler):
                     cover = details.get('cover', '')
                     if not title or len(title) > 100:
                         raise ValueError('Название должно содержать от 1 до 100 символов')
-                    if len(gallery) > 20 or any(m['type'] not in ('photo', 'video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', m['url'])) for m in gallery):
+                    if len(gallery) > 20 or any(m['type'] not in ('photo', 'video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/(?:(?:coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', m['url'])) for m in gallery):
                         raise ValueError('Добавьте до 20 фото или видео по HTTPS-ссылкам')
                     if cover and not any(m['url']==cover for m in gallery):
                         raise ValueError('Выберите главное фото из галереи')
