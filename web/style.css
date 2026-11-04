@@ -14,13 +14,13 @@
 .media-preview span { position: absolute; top: 6px; left: 6px; padding: 3px 6px; background: #172f25; color: white; border-radius: 4px; pointer-events: none; }
 #manage-exercises { margin-top: 20px; }
 .iti { display: block; width: 100%; }
-#profile-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-#profile-form legend { padding: 0; margin-bottom: .5rem; font-size: 1.5rem; font-weight: 500; }
-#profile-form .mb-3 { margin-bottom: 1rem; }
+:is(#profile-form, #client-create) fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+:is(#profile-form, #client-create) legend { padding: 0; margin-bottom: .5rem; font-size: 1.5rem; font-weight: 500; }
+:is(#profile-form, #client-create) .mb-3 { margin-bottom: 1rem; }
 #app .form-label { display: block; margin-bottom: .5rem; font-size: 1rem; font-weight: 400; }
 #app .form-control { display: block; font-size: 1rem; line-height: 1.5; }
 
-#profile-form .form-label { margin-top: 0; }
+:is(#profile-form, #client-create) .form-label { margin-top: 0; }
 #app td .form-control { font-size: .875rem; }
 .clients-table { overflow-x: auto; border: 1px solid #ccd5c8; border-radius: 8px; }
 .clients-table .table { min-width: 34rem; margin: 0; background: #fff; }
@@ -29,3 +29,17 @@
 .clients-table .table-striped > tbody > tr:nth-of-type(odd) > * { background: #edf1e8; }
 .clients-table tbody tr:last-child > * { border-bottom: 0; }
 .clients-table ul { margin: 0; padding-inline-start: 1.25rem; }
+.exercise-summary { display:flex; align-items:baseline; flex-wrap:wrap; gap:0 12px; }
+.client-comment > summary { display:inline-block; padding:4px 8px; border:1px solid #b9c6b9; border-radius:6px; font-size:.875rem; }
+.client-comment p { white-space:pre-wrap; }
+.workout-report > :not(caption) > * > * { border-bottom:1px solid #ccd5c8; }
+.workout-report.table-hover > tbody > tr:hover > * { background:#edf1e8; }
+.clients-table .avatar { display:inline-grid; place-items:center; overflow:hidden; border-radius:50%; background:#edf1e8; font-weight:600; }
+.clients-table .avatar-lg { width:48px; height:48px; }
+.clients-table .avatar-img { width:100%; height:100%; object-fit:cover; }
+.clients-table .avatar.theme-secondary { background: #e2e8e0; color: #35443b; }
+.error-page { text-align: center; }
+.error-page .error-brand { font-size: 1.5rem; font-weight: 600; }
+.error-page h1 { font-size: clamp(6rem, 25vw, 10rem); line-height: 1; margin: 2rem 0 1rem; }
+.error-page .error-description { font-size: 1.5rem; margin-bottom: 2rem; }
+@media (min-width: 768px) { aside.col-12 { min-height: 100vh; min-height: 100dvh; } }
