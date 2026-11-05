@@ -18,6 +18,21 @@ def connect():
         c.close()
 def password(value, salt):
     return hashlib.pbkdf2_hmac('sha256', value.encode(), salt.encode(), 200000).hex()
+def save_coach_bio(db, user_id, body):
+    if 'bio' not in body:
+        return
+    bio = body['bio']
+    cleaned = {}
+    for key in ('education', 'achievements', 'specializations'):
+        items = bio.get(key, [])
+        if not isinstance(items, list) or len(items) > 50 or any(
+            not isinstance(item, str) or len(item) > 1000 for item in items
+        ):
+            raise ValueError('До 50 пунктов в каждом списке, до 1000 символов на пункт')
+        cleaned[key] = [item.strip() for item in items if item.strip()]
+    db.execute('UPDATE users SET coach_bio=? WHERE id=?', (json.dumps(cleaned), user_id))
+
+
 def init():
     DB.parent.mkdir(exist_ok=True)
     demo_file = DB.parent / 'demo-password.txt'
@@ -30,8 +45,12 @@ def init():
 CREATE TABLE IF NOT EXISTS exercises(id INTEGER PRIMARY KEY,name TEXT,instruction TEXT,media TEXT);
 CREATE TABLE IF NOT EXISTS workouts(id INTEGER PRIMARY KEY,title TEXT,client INTEGER,coach INTEGER,items TEXT);
 CREATE TABLE IF NOT EXISTS results(workout INTEGER,client INTEGER,payload TEXT,updated TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(workout,client));''')
+        from reference_data import initialize_references
+        initialize_references(c)
+        if not any(row['name'] == 'gallery' for row in c.execute('PRAGMA table_info(exercises)')):
+            c.execute("ALTER TABLE exercises ADD COLUMN gallery TEXT NOT NULL DEFAULT '[]'")
         user_columns = {row['name'] for row in c.execute('PRAGMA table_info(users)')}
-        for field in ('surname', 'given_name', 'patronymic', 'phone', 'profile_media'):
+        for field in ('surname', 'given_name', 'patronymic', 'phone', 'profile_media', 'coach_bio'):
             if field not in user_columns:
                 c.execute(f"ALTER TABLE users ADD COLUMN {field} TEXT NOT NULL DEFAULT ''")
         columns = {row['name'] for row in c.execute('PRAGMA table_info(workouts)')}
@@ -70,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
         from urllib.parse import urlsplit
         self.path = urlsplit(self.path).path
         if self.path.startswith('/api/'):return self.api('GET')
-        if re.fullmatch(r'/uploads/(?:(?:coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', self.path):
+        if re.fullmatch(r'/uploads/(?:(?:admin|coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', self.path):
             path = DB.parent / 'uploads' / self.path.removeprefix('/uploads/')
             if not path.is_file():
                 return self.send_error(404)
@@ -128,11 +147,45 @@ class Handler(BaseHTTPRequestHandler):
                     if not u or not secrets.compare_digest(u['hash'],password(body.get('password',''),u['salt'])):return self.respond(401,{'error':'Неверная почта или пароль'})
                     t=secrets.token_hex(32);SESSIONS[t]=u['id'];return self.respond(200,{'ok':True},f'session={t}; HttpOnly; SameSite=Strict; Path=/')
                 if not uid:return self.respond(401,{'error':'Войдите в аккаунт'})
-                u=c.execute('SELECT id,name,email,role,coach,surname,given_name,patronymic,phone,profile_media FROM users WHERE id=?',(uid,)).fetchone();role=u['role']
+                u=c.execute('SELECT id,name,email,role,coach,surname,given_name,patronymic,phone,profile_media,coach_bio FROM users WHERE id=?',(uid,)).fetchone();role=u['role']
                 if self.path=='/api/logout':
                     SESSIONS.pop(token.value,None);return self.respond(200,{'ok':True},'session=; Max-Age=0; Path=/')
+                if self.path=='/api/references':
+                    if role != 'admin':
+                        return self.respond(403, {'error':'Нет доступа'})
+                    if method == 'GET':
+                        return self.respond(200, {
+                            'groups':[dict(row) for row in c.execute('SELECT * FROM tag_groups ORDER BY id')],
+                            'tags':[dict(row) for row in c.execute('SELECT * FROM tags ORDER BY id')]})
+                    name = body.get('name','').strip()
+                    if body.get('action') == 'batch':
+                        group = int(body['group'])
+                        tags = body['tags']
+                        existing = {row['id'] for row in c.execute('SELECT id FROM tags WHERE group_id=?',(group,))}
+                        names = [tag['name'].strip() for tag in tags]
+                        if {tag['id'] for tag in tags} != existing or len(tags)!=len(existing) or any(not 1<=len(value)<=80 for value in names) or len({value.casefold() for value in names})!=len(names):
+                            raise ValueError('Проверьте названия тегов или обновите справочник')
+                        for tag, name in zip(tags,names):
+                            c.execute('UPDATE tags SET name=? WHERE id=? AND group_id=?',(name,tag['id'],group))
+                        c.commit()
+                        return self.respond(200, {'ok':True})
+                    if body.get('action') == 'delete':
+                        c.execute('DELETE FROM tags WHERE id=?',(int(body['id']),))
+                    else:
+                        group = int(body['group'])
+                        if not 1 <= len(name) <= 80 or not c.execute('SELECT 1 FROM tag_groups WHERE id=?',(group,)).fetchone():
+                            raise ValueError('Проверьте группу и название')
+                        duplicate = any(row['name'].casefold()==name.casefold() and row['id']!=body.get('id') for row in c.execute('SELECT id,name FROM tags WHERE group_id=?',(group,)))
+                        if duplicate:
+                            raise ValueError('Такой тег уже существует')
+                        if body.get('id'):
+                            c.execute('UPDATE tags SET name=? WHERE id=? AND group_id=?',(name,int(body['id']),group))
+                        else:
+                            c.execute('INSERT INTO tags(group_id,name) VALUES(?,?)',(group,name))
+                    c.commit()
+                    return self.respond(200, {'ok':True})
                 if self.path=='/api/state':
-                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach,phone,surname,given_name,patronymic,profile_media FROM users') if role=='admin' or x['id']==uid or (role=='coach' and x['coach']==uid)]
+                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach,phone,surname,given_name,patronymic,profile_media,coach_bio FROM users') if role=='admin' or x['id']==uid or (role=='coach' and x['coach']==uid)]
                     workouts=[dict(x) for x in c.execute('SELECT * FROM workouts') if role=='admin' or x['client']==uid or (role=='coach' and x['coach']==uid)]
                     for w in workouts:
                         w['details']=json.loads(w['details']); w['items']=json.loads(w['items']); r=c.execute('SELECT payload,updated FROM results WHERE workout=? AND client=?',(w['id'],w['client'])).fetchone();w['result']=json.loads(r['payload']) if r else {};w['updated']=r['updated'] if r else None
@@ -146,7 +199,7 @@ class Handler(BaseHTTPRequestHandler):
                             return self.respond(404, {'error':'Coach unavailable'})
                     gallery = body['gallery']
                     main = body.get('main')
-                    if len(gallery)>20 or any(item['type']!='photo' or not re.fullmatch(r'/uploads/(?:(?:coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp)',item['url']) for item in gallery):
+                    if len(gallery)>20 or any(item['type']!='photo' or not re.fullmatch(r'/uploads/(?:(?:admin|coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp)',item['url']) for item in gallery):
                         raise ValueError('Invalid photos')
                     if main is not None and (type(main) is not int or not 0 <= main < len(gallery)):
                         raise ValueError('Invalid main photo')
@@ -174,6 +227,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(409, {'error':'Эта почта уже используется'})
                     c.execute('UPDATE users SET surname=?,given_name=?,patronymic=?,name=?,email=?,phone=? WHERE id=?',
                               (*parts, ' '.join(filter(None,parts)), email, phone, target_uid))
+                    if role in ('coach', 'admin'):
+                        save_coach_bio(c, target_uid, body)
                     c.commit()
                     return self.respond(200, {'ok':True})
                 if (self.path in ('/api/client-create','/api/client-edit') and role=='coach') or (self.path=='/api/coach-create' and role=='admin'):
@@ -206,6 +261,8 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('INSERT INTO users(name,email,role,salt,hash,coach,surname,given_name,patronymic,phone) VALUES(?,?,?,?,?,?,?,?,?,?)',
                               (name,email,account_role,salt,password(temporary_password,salt),uid if account_role=='user' else None,surname,given_name,patronymic,phone))
                     client_id = c.execute('SELECT last_insert_rowid()').fetchone()[0]
+                    if account_role == 'coach':
+                        save_coach_bio(c, client_id, body)
                     c.commit()
                     return self.respond(201, {'id':client_id,'email':email,'password':temporary_password})
                 if self.path=='/api/client-search' and role=='coach':
@@ -219,7 +276,20 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path=='/api/exercises' and role=='admin':
                     name=body['name'].strip(); media=body.get('media','')
                     if not name or (media and not media.startswith('https://')):raise ValueError('Укажите название и HTTPS-ссылку на медиа')
-                    c.execute('INSERT INTO exercises(name,instruction,media) VALUES(?,?,?)',(name,body.get('instruction',''),media))
+                    gallery = body.get('gallery', [])
+                    if not isinstance(gallery, list) or len(gallery) > 20 or any(
+                        not isinstance(photo, dict) or photo.get('type') != 'photo'
+                        or not re.fullmatch(r'/uploads/(?:(?:admin|coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp)', photo.get('url', ''))
+                        for photo in gallery
+                    ):
+                        raise ValueError('Проверьте фотографии в галерее')
+                    if gallery:
+                        urls = [photo['url'] for photo in gallery]
+                        media = body.get('cover') or urls[0]
+                        if media not in urls:
+                            raise ValueError('Выберите главное фото из галереи')
+                    c.execute('INSERT INTO exercises(name,instruction,media,gallery) VALUES(?,?,?,?)',
+                              (name,body.get('instruction',''),media,json.dumps(gallery)))
                 elif self.path=='/api/trainers' and role=='admin':
                     if len(body['password'])<8:raise ValueError('Пароль должен содержать не менее 8 символов')
                     salt=secrets.token_hex(16);c.execute('INSERT INTO users(name,email,role,salt,hash) VALUES(?,?,?,?,?)',(body['name'],body['email'],'coach',salt,password(body['password'],salt)))
@@ -248,7 +318,7 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         gallery = body['gallery']
                         main = body.get('main')
-                        if len(gallery)>20 or any(m['type'] not in ('photo','video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/(?:(?:coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)',m['url'])) for m in gallery):
+                        if len(gallery)>20 or any(m['type'] not in ('photo','video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/(?:(?:admin|coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)',m['url'])) for m in gallery):
                             raise ValueError('Invalid gallery')
                         if main is not None and (type(main) is not int or not 0 <= main < len(gallery)):
                             raise ValueError('Invalid main media')
@@ -291,7 +361,7 @@ class Handler(BaseHTTPRequestHandler):
                     cover = details.get('cover', '')
                     if not title or len(title) > 100:
                         raise ValueError('Название должно содержать от 1 до 100 символов')
-                    if len(gallery) > 20 or any(m['type'] not in ('photo', 'video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/(?:(?:coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', m['url'])) for m in gallery):
+                    if len(gallery) > 20 or any(m['type'] not in ('photo', 'video') or not (m['url'].startswith('https://') or re.fullmatch(r'/uploads/(?:(?:admin|coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', m['url'])) for m in gallery):
                         raise ValueError('Добавьте до 20 фото или видео по HTTPS-ссылкам')
                     if cover and not any(m['url']==cover for m in gallery):
                         raise ValueError('Выберите главное фото из галереи')
