@@ -52,3 +52,19 @@
 .coach-qualifications .accordion-button { cursor: pointer; padding: 14px 16px; font-weight: 600; }
 .coach-qualifications .list-group { list-style: none; margin: 0; padding: 0; }
 .coach-qualifications .list-group-item { padding: 12px 16px; border-top: 1px solid #ccd5c8; }
+
+.dashboard-changes { list-style: none; padding: 0; margin: 0; line-height: 1.8; }
+.deleted-account > * { text-decoration: line-through; } .deleted-account a { text-decoration: inherit; }
+.social-accounts-header, .social-accounts .list-group-item { display:flex; justify-content:space-between; align-items:center; gap:1rem; }
+.social-accounts-header h2 { margin:0; }
+.social-accounts .list-group { list-style:none; margin:1rem 0; padding:0; }
+.social-accounts .list-group-item { padding:.75rem 0; border-top:1px solid #ccd5c8; }
+.social-accounts button:disabled { cursor:default; }
+.social-accounts > p { margin-bottom:0; }
+.coach-delete .form-field { display:flex; align-items:center; gap:.75rem; margin-bottom:1rem; }
+.coach-delete .form-field label { margin:0; cursor:pointer; }
+.coach-delete .switch input { appearance:none; display:block; position:relative; width:2.75rem; height:1.5rem; margin:0; padding:0; border-radius:1rem; background:#dce4da; cursor:pointer; }
+.coach-delete .switch input::before { content:""; position:absolute; top:.15rem; left:.15rem; width:1.1rem; height:1.1rem; border-radius:50%; background:#fff; }
+.coach-delete .switch input:checked { background:#28533f; }
+.coach-delete .switch input:checked::before { transform:translateX(1.25rem); }
+.coach-delete button:disabled { cursor:default; }
