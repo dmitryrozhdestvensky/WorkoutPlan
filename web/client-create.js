@@ -3,8 +3,7 @@ function showClientCreate(client = null, isCoach = false) {
     const name = [client.surname, client.given_name, client.patronymic].filter(Boolean).join(' ') || client.name;
     const workouts = state.workouts.filter(workout => workout.client === client.id);
     const dateLabel = date => date ? esc(date.split('-').reverse().join('.')) : '—';
-    $('#content').innerHTML = `<button class="secondary" id="back-to-clients">${isCoach?'Вернуться к тренерам':'Вернуться к клиентам'}</button>
-      <h1>Карточка клиента</h1>
+    $('#content').innerHTML = `<h1>Карточка клиента</h1>
       <section class="paper"><dl>
         <dt>ФИО</dt><dd>${esc(name || '—')}</dd>
         <dt>Почта</dt><dd>${esc(client.email || '—')}</dd>
@@ -22,8 +21,7 @@ function showClientCreate(client = null, isCoach = false) {
           </tr>`).join('') || '<tr><td colspan="4">Тренировки пока не назначены.</td></tr>'}</tbody>
         </table>
       </div>`;
-    if (isCoach) adminBreadcrumb('Тренеры', 'Добавить тренера');
-  $('#back-to-clients').onclick = isCoach ? trainers : manageClients;
+    adminBreadcrumb('Клиенты', 'Карточка клиента');
     document.querySelectorAll('[data-client-workout]').forEach(link => {
       link.onclick = event => {
         event.preventDefault();
