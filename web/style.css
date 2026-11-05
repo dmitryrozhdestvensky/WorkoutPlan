@@ -43,3 +43,7 @@
 .error-page h1 { font-size: clamp(6rem, 25vw, 10rem); line-height: 1; margin: 2rem 0 1rem; }
 .error-page .error-description { font-size: 1.5rem; margin-bottom: 2rem; }
 @media (min-width: 768px) { aside.col-12 { min-height: 100vh; min-height: 100dvh; } }
+.reference-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
+.exercise-breadcrumb { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; padding: 0; margin: 0 0 1rem; }
+.exercise-breadcrumb .breadcrumb-item + .breadcrumb-item::before { content: '›'; margin-inline-end: .5rem; color: #52635b; }
+.exercise-breadcrumb .active { color: #52635b; }
