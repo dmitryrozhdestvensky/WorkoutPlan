@@ -1,5 +1,6 @@
 """Import a read-only SQLite snapshot into an empty local PostgreSQL test database."""
 import os
+import argparse
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -25,7 +26,12 @@ def literal(value):
 
 
 def main():
-    source = ROOT / 'data' / 'app.sqlite3'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--database', choices=('workoutplan_test', 'workoutplan'), default='workoutplan_test')
+    parser.add_argument('--source', type=Path, default=ROOT / 'data' / 'app.sqlite3')
+    options = parser.parse_args()
+    target = options.database
+    source = options.source.resolve()
     statements = ['BEGIN;', "SET LOCAL TIME ZONE 'UTC';", 'SET LOCAL standard_conforming_strings = on;']
     counts = {}
     with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as db:
@@ -55,7 +61,7 @@ def main():
     executable = Path('W:/data/postgres17/pgsql/bin/psql.exe')
     result = subprocess.run(
         [str(executable), '-X', '-w', '-h', '127.0.0.1', '-p', '15432',
-         '-U', 'workoutplan_test', '-d', 'workoutplan_test', '-v', 'ON_ERROR_STOP=1', '-q'],
+         '-U', 'workoutplan_test', '-d', target, '-v', 'ON_ERROR_STOP=1', '-q'],
         input='\n'.join(statements).encode('utf-8'),
         env={**os.environ, 'PGPASSWORD': password, 'PGCLIENTENCODING': 'UTF8'},
         capture_output=True,
