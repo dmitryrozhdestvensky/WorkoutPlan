@@ -1,4 +1,4 @@
-let state, page='workouts', selected=null, draft=[];
+let state, page='home', selected=null, draft=[];
 const $=s=>document.querySelector(s), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,body){const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.error);return d}
 function toast(t){$('#status').textContent=t;$('#status').style.display='block';setTimeout(()=>$('#status').style.display='none',4000)}
@@ -10,13 +10,23 @@ function styleFormFields() {
 }
 const formObserver = new MutationObserver(styleFormFields);
 formObserver.observe(document.querySelector("#app"), {childList:true, subtree:true});
-function login(){state=null;$('#app').innerHTML=`<div class="container px-4"><div class="row justify-content-center"><main class="login col-12 col-sm-10 col-md-8 col-lg-6"><h1>ПланТренировок</h1><p class="muted">Ваш план. Ваш темп. Ваш прогресс.</p><h2>Войти в аккаунт</h2><form id="login" class="row gy-2"><div class="col-12"><label for="email">Электронная почта</label><input id="email" type="email" required autocomplete="username"></div><div class="col-12"><label for="password">Пароль</label><input id="password" type="password" required autocomplete="current-password"></div><div class="col-12"><button type="submit">Войти</button></div><p id="loginError" class="error col-12" role="alert"></p></form><div class="demo"><p><b>Локальная демонстрация</b><br><small>Выберите роль и введите пароль из файла data/demo-password.txt.</small></p>${[['user','Пользователь'],['coach','Тренер'],['admin','Администратор']].map(([r,n])=>`<button class="secondary" data-demo="${r}">${n}</button>`).join('')}</div></main></div></div>`;document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>{$('#email').value=b.dataset.demo+'@demo.local';$('#password').focus()});$('#login').onsubmit=async e=>{e.preventDefault();try{await api('login',{email:$('#email').value,password:$('#password').value});page='workouts';selected=null;await load()}catch(err){$('#loginError').textContent=err.message}}}
-function render(){const u=state.user,role=u.role;const coachId=new URLSearchParams(location.search).get('coach');const links=role==='admin'?[['library','Упражнения'],['trainers','Тренеры'],['references','Справочники']]:role==='coach'?[['workouts','Программы клиентов'],['builder','Создать тренировку'],['clients','Клиенты'],['profile','Кабинет тренера'],['library','Библиотека']]:[['workouts','Мой план'],['history','История занятий'],['profile','Мой профиль']];if(!links.some(x=>x[0]===page))page=links[0][0];$('#app').innerHTML=`<div class="container-fluid px-0"><div class="row g-0 min-vh-100"><aside class="col-12 col-md-4 col-lg-3 col-xl-2 px-4"><strong>ПланТренировок</strong><small>Пространство для движения</small><nav>${links.map(([id,n])=>`<button data-nav="${id}" class="${page===id?'active':''}">${n}</button>`).join('')}</nav><div class="account"><div>${esc(u.name)}<br><small>${{user:'Пользователь',coach:'Тренер',admin:'Администратор'}[role]}</small></div><button id="logout" class="secondary">Выйти</button></div></aside><main id="content" class="col-12 col-md-8 col-lg-9 col-xl-10 px-4"></main></div></div>`;document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{if(new URLSearchParams(location.search).has('coach'))history.replaceState(null,'','/');page=b.dataset.nav;selected=null;render()});$('#logout').onclick=()=>run(async()=>{await api('logout',{});login()});if(role==='admin' && coachId){adminCoachProfile(Number(coachId));return;}if(page==='references')showReferences();else if(page==='profile')coachProfile();else if(page==='clients')manageClients();else if(page==='library')library();else if(page==='trainers')trainers();else if(page==='builder')builder();else if(selected)workout();else overview()}
+function login(){state=null;$('#app').innerHTML=`<div class="container px-4"><div class="row justify-content-center"><main class="login col-12 col-sm-10 col-md-8 col-lg-6"><h1>ПланТренировок</h1><p class="muted">Ваш план. Ваш темп. Ваш прогресс.</p><h2>Войти в аккаунт</h2><form id="login" class="row gy-2"><div class="col-12"><label for="email">Электронная почта</label><input id="email" type="email" required autocomplete="username"></div><div class="col-12"><label for="password">Пароль</label><input id="password" type="password" required autocomplete="current-password"></div><div class="col-12"><button type="submit">Войти</button></div><p id="loginError" class="error col-12" role="alert"></p></form><div class="demo"><p><b>Локальная демонстрация</b><br><small>Выберите роль и введите пароль из файла data/demo-password.txt.</small></p>${[['user','Пользователь'],['coach','Тренер'],['admin','Администратор']].map(([r,n])=>`<button class="secondary" data-demo="${r}">${n}</button>`).join('')}</div></main></div></div>`;document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>{$('#email').value=b.dataset.demo+'@demo.local';$('#password').focus()});$('#login').onsubmit=async e=>{e.preventDefault();try{await api('login',{email:$('#email').value,password:$('#password').value});page='home';selected=null;await load()}catch(err){$('#loginError').textContent=err.message}}}
+function render(){const u=state.user,role=u.role;const coachId=new URLSearchParams(location.search).get('coach');const roleLinks=role==='admin'?[['trainers','Тренеры'],['admin-clients','Клиенты'],['library','Упражнения'],['references','Справочники']]:role==='coach'?[['workouts','Программы клиентов'],['builder','Создать тренировку'],['clients','Клиенты'],['profile','Кабинет тренера'],['library','Библиотека']]:[['workouts','Мой план'],['history','История занятий'],['profile','Мой профиль']];const links=role==='admin'?roleLinks:[['home','Главная'],...roleLinks];if(page!=='home'&&!links.some(x=>x[0]===page))page=links[0][0];$('#app').innerHTML=`<div class="container-fluid px-0"><div class="row g-0 min-vh-100"><aside class="col-12 col-md-4 col-lg-3 col-xl-2 px-4"><strong>${role==='admin'?'<a href="/" style="color:inherit">ПланТренировок</a>':'ПланТренировок'}</strong><small>Пространство для движения</small><nav>${links.map(([id,n])=>`<button data-nav="${id}" class="${page===id?'active':''}">${n}</button>`).join('')}</nav><div class="account"><div>${esc(u.name)}<br><small>${{user:'Пользователь',coach:'Тренер',admin:'Администратор'}[role]}</small></div><button id="logout" class="secondary">Выйти</button></div></aside><main id="content" class="col-12 col-md-8 col-lg-9 col-xl-10 px-4"></main></div></div>`;document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{if(location.search)history.replaceState(null,'','/');page=b.dataset.nav;selected=null;render()});$('#logout').onclick=()=>run(async()=>{await api('logout',{});login()});const clientId = new URLSearchParams(location.search).get('client');
+if (role === 'admin' && clientId) {
+  const client = state.users.find(user => user.role === 'user' && user.id === Number(clientId));
+  if (client) showClientCreate({...client, login:client.email, email:client.email.endsWith('@login.invalid') ? '' : client.email});
+  else $('#content').textContent = 'Клиент не найден';
+  return;
+}
+if(role==='admin' && coachId){adminCoachProfile(Number(coachId));return;}if(page==='home') {
+  $('#content').innerHTML = '<h1>'+({admin:'Главная администратора',coach:'Главная тренера',user:'Главная клиента'}[role])+'</h1>';
+  if (role === 'admin') showAdminDashboard();
+} else if(page==='references')showReferences();else if(page==='profile')coachProfile();else if(page==='clients')manageClients();else if(page==='library')library();else if(page==='trainers')trainers();else if(page==='admin-clients')adminClients();else if(page==='builder')builder();else if(selected)workout();else overview()}
 function overview(){const coach=state.user.role==='coach';let ws=state.workouts.filter(w=>page!=='history'||Object.keys(w.result).length);$('#content').innerHTML=`<div class="top"><div><h1>${page==='history'?'История занятий':coach?'Программы клиентов':'Ваш план тренировок'}</h1><p class="muted">${coach?'Назначения и фактические результаты ваших клиентов.':'Открывайте тренировку и сохраняйте результат после каждого упражнения.'}</p></div>${coach?'<button id="coach-profile">Кабинет тренера</button>':'<span class="tag">Личный дневник</span>'}</div>${!coach&&page!=='history'?'<div class="paper"><h2>Начните с движения</h2><p>В основе — первая неделя вашего плана. Разминка: экстензия и ротаторы, динамическая растяжка. Заминка: растяжка и 10 минут кардио.</p><small>Внесена первая неделя из примеров. Остальные недели предстоит добавить.</small></div>':''}<div class="list">${ws.map(w=>{const done=Object.values(w.result).filter(r=>r.done).length;return `<div class="entry-row"><div>${validMedia(w.details?.cover)&&w.details.gallery?.find(m=>m.url===w.details.cover)?.type!=='video'?'<img width="120" loading="lazy" alt="" src="'+esc(w.details.cover)+'">':''}<h3>${esc(w.title)}</h3>${w.client===null?'<span class="tag">Шаблон</span>':''}<small>${coach?esc(state.users.find(u=>u.id===w.client)?.name)+' · ':''}${w.items.length} упражнения · отмечено ${done} из ${w.items.length}</small>${w.updated?`<p><small>Последнее сохранение: ${esc(w.updated)} UTC</small></p>`:''}</div><button data-open="${w.id}">${coach?(w.client===null?'Открыть шаблон':'Результаты'):done?'Продолжить':'Открыть'}</button></div>`}).join('')||'<p class="empty">Здесь пока нет тренировок.</p>'}</div>`;if($('#coach-profile'))$('#coach-profile').onclick=()=>{page='profile';render()};document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{selected=+b.dataset.open;render()})}
 function media(url){if(!url||!validMedia(url))return '<small>Материалы по технике пока не добавлены.</small>';return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Открыть картинку или видео по технике</a>`}
 function workout(){const w=state.workouts.find(w=>w.id===selected),readonly=state.user.role!=='user';$('#content').innerHTML=`<button class="secondary" id="back">Вернуться к плану</button><h1 style="margin-top:24px">${esc(w.title)}</h1><p class="muted">${readonly?'Назначение тренера и сохранённое выполнение клиента.':'Отмечайте подходы, затем сохраняйте результат упражнения.'}</p><p>${esc(w.details?.description)}</p><div class="actions">${orderedGallery(w.details).filter(m=>validMedia(m.url)).map(m=>m.type==='photo'?'<a href="'+esc(m.url)+'" target="_blank" rel="noopener"><img width="150" alt="Фото тренировки" src="'+esc(m.url)+'"></a>':m.url.startsWith('/uploads/')?'<video controls preload="metadata" width="240" src="'+esc(m.url)+'"></video>':media(m.url)).join('')}</div>${w.client===null?'<form id="assign"><label>Назначить клиенту<select name="client" required><option value="">Выберите клиента</option>'+state.users.filter(u=>u.role==='user').map(u=>'<option value="'+u.id+'">'+esc(u.name)+'</option>').join('')+'</select></label><button>Назначить копию</button></form>':''}<div class="paper">${w.items.map((it,i)=>{const ex=state.exercises.find(e=>e.id===+it.exercise),r=w.result[i]||{},sets=r.sets||[];return `<section class="exercise" data-ex="${i}"><h3>${i+1}. ${esc(ex?.name)} ${readonly?`<span class="tag">${r.done?'Упражнение выполнено':r.sets?'Результат сохранён':'Нет результата'}</span>`:''}</h3><div class="exercise-summary"><p class="muted">${it.sets} подхода · ${esc(it.reps)} повторений${i===0?` · ${it.warmup||0} разминочных`:''}</p>${readonly && r.note?.trim() ? `<details class="client-comment"><summary>Комментарий клиента</summary><p>${esc(r.note)}</p></details>` : ''}</div>${readonly?'':`<details><summary>Техника выполнения</summary><p>${esc(ex?.instruction)}</p>${media(it.media||ex?.media)}<p>${esc(it.note)}</p></details>`}<table class="${readonly ? 'table table-hover workout-report' : ''}"><thead><tr><th>Подход</th><th>Вес, кг</th><th>${it.reps.includes('сек')?'Секунды':'Повторения'}</th><th>Готово</th></tr></thead><tbody>${Array.from({length:+it.sets},(_,j)=>`<tr><td>${j+1}</td><td>${readonly?esc(sets[j]?.weight===''?'-':sets[j]?.weight??'-'):`<input aria-label="Вес, подход ${j+1}" type="number" min="0" max="2000" step="0.5" data-weight value="${esc(sets[j]?.weight||'')}" ${readonly?'disabled':''}>`}</td><td>${readonly?esc(sets[j]?.reps===''?'-':sets[j]?.reps??'-'):`<input aria-label="Повторения или секунды, подход ${j+1}" type="number" min="0" max="10000" data-reps value="${esc(sets[j]?.reps||'')}" ${readonly?'disabled':''}>`}</td><td>${readonly?resultIcon(sets[j]?.done):`<input aria-label="Подход ${j+1} выполнен" type="checkbox" data-check ${sets[j]?.done?'checked':''} ${readonly?'disabled':''}>`}</td></tr>`).join('')}</tbody></table>${readonly?'':`<label>Комментарий ${readonly?'пользователя':''}<textarea data-note ${readonly?'disabled':''}>${esc(r.note||'')}</textarea></label>`}${readonly?'':`<div class="actions"><button data-save="${i}">Сохранить результат</button><label style="margin:0;display:flex;align-items:center;gap:10px"><input data-complete type="checkbox" ${r.done?'checked':''}>Упражнение выполнено</label></div>`}</section>`}).join('')}</div>`;if(w.client===null) templateSummary(w);if($('#assign'))$('#assign').onsubmit=e=>{e.preventDefault();run(async()=>{await api('workouts',{template:w.id,assignments:[...e.target.querySelectorAll('input:checked')].map(input=>({client:Number(input.value),from:input.closest('tr').querySelector('[name=from]').value,to:input.closest('tr').querySelector('[name=to]').value}))});selected=null;await load();toast('Копия назначена клиенту')})};$('#back').onclick=()=>{selected=null;render()};document.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>run(async()=>{const section=b.closest('section'),i=b.dataset.save;const next={...w.result,[i]:{sets:[...section.querySelectorAll('tbody tr')].map(tr=>({weight:tr.querySelector('[data-weight]').value,reps:tr.querySelector('[data-reps]').value,done:tr.querySelector('[data-check]').checked})),note:section.querySelector('[data-note]').value,done:section.querySelector('[data-complete]').checked}};b.disabled=true;try{await api('results',{workout:w.id,result:next});w.result=next;toast('Результат сохранён на сервере')}finally{b.disabled=false}}))}
 function library(){const admin=state.user.role==='admin';$('#content').innerHTML=`<div class="top"><h1>Библиотека упражнений</h1>${admin?'<button id="add-exercise">Добавить упражнение</button>':''}</div><p class="muted">Общие упражнения для программ всех тренеров.</p><div class="table-responsive table-card clients-table"><table class="table table-striped align-top" aria-label="Библиотека упражнений"><thead><tr><th scope="col">№</th><th scope="col">Упражнение</th><th scope="col">Техника выполнения</th><th scope="col">Материалы</th></tr></thead><tbody>${state.exercises.map((exercise,index)=>`<tr><th scope="row">${index+1}</th><td>${esc(exercise.name)}</td><td>${esc(exercise.instruction || '—')}</td><td>${exercise.media ? media(exercise.media) : '—'}</td></tr>`).join('') || '<tr><td colspan="4">Упражнения пока не добавлены.</td></tr>'}</tbody></table></div>`;if(admin)adminBreadcrumb('Упражнения');if(admin)$('#add-exercise').onclick=showExerciseCreate;}
-function trainers(){$('#content').innerHTML=`<div class="top"><h1>Тренеры</h1><button id="add-coach">Добавить тренера</button></div><p class="muted">Доступ к конструктору выдаёт администратор.</p><div class="table-responsive table-card clients-table"><table class="table table-striped align-top" aria-label="Тренеры"><thead><tr><th scope="col">№</th><th scope="col">Аватар</th><th scope="col">ФИО</th><th scope="col">Телефон</th><th scope="col">Клиентов</th></tr></thead><tbody>${state.users.filter(user=>user.role==='coach').map((user,index)=>`<tr><th scope="row">${index+1}</th><td>${clientAvatar(user)}</td><td><a href="/?coach=${user.id}" target="_blank" rel="noopener">${user.surname ? `<strong>${esc(user.surname)}</strong>${user.given_name || user.patronymic ? '<br>'+esc([user.given_name,user.patronymic].filter(Boolean).join(' ')) : ''}` : esc(user.name)}</a></td><td>${esc(formatClientPhone(user.phone))}</td><td>${state.users.filter(client=>client.role==='user' && client.coach===user.id).length}</td></tr>`).join('') || '<tr><td colspan="5">Тренеры пока не добавлены.</td></tr>'}</tbody></table></div>`;adminBreadcrumb('Тренеры');$('#add-coach').onclick=()=>showClientCreate(null,true);}
+function trainers(){$('#content').innerHTML=`<div class="top"><h1>Тренеры</h1><button id="add-coach">Добавить тренера</button></div><p class="muted">Доступ к конструктору выдаёт администратор.</p><div class="table-responsive table-card clients-table"><table class="table table-striped align-top" aria-label="Тренеры"><thead><tr><th scope="col">№</th><th scope="col">Аватар</th><th scope="col">ФИО</th><th scope="col">Телефон</th><th scope="col">Клиентов</th></tr></thead><tbody>${state.users.filter(user=>user.role==='coach').map((user,index)=>`<tr class="${user.is_del ? 'deleted-account' : ''}"><th scope="row">${index+1}</th><td>${clientAvatar(user)}</td><td><a href="/?coach=${user.id}">${user.surname ? `<strong>${esc(user.surname)}</strong>${user.given_name || user.patronymic ? '<br>'+esc([user.given_name,user.patronymic].filter(Boolean).join(' ')) : ''}` : esc(user.name)}</a></td><td>${esc(formatClientPhone(user.phone))}</td><td>${state.users.filter(client=>client.role==='user' && !client.is_del && client.coach===user.id).length}</td></tr>`).join('') || '<tr><td colspan="5">Тренеры пока не добавлены.</td></tr>'}</tbody></table></div>`;adminBreadcrumb('Тренеры');$('#add-coach').onclick=()=>showClientCreate(null,true);}
 let builderFields = {}, builderMedia = {};
 function builder(){if(!draft.length)draft=[{exercise:state.exercises[0].id,sets:3,reps:'8–10',warmup:2,note:'',media:''}];$('#content').innerHTML=`<h1>Новая тренировка</h1><p class="muted">Соберите занятие из библиотеки. Сохраните его как шаблон или сразу назначьте клиенту.</p><form id="builder"><div class="row gy-2"><label class="col-12 col-md-6">Название<input name="title" required value="Персональная тренировка"></label><label class="col-12 col-md-6">Клиент<select name="client"><option value="">Сохранить как шаблон</option>${state.users.filter(u=>u.role==='user').map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label></div><label>Описание тренировки<textarea name="description"></textarea></label><section><h2>Галерея</h2><div class="actions" id="builder-gallery"></div></section><div id="drafts"></div><div class="actions"><button type="button" class="secondary" id="add">Добавить упражнение</button><button type="submit">Сохранить тренировку</button></div></form>`;drawDraft();const form=$('#builder');for(const [key,value] of Object.entries(builderFields)) form.elements[key].value=value;
 renderGalleryPreview($('#builder-gallery'),builderMedia,()=>{
@@ -243,7 +253,10 @@ function coachProfile() {
   const details = JSON.parse(user.profile_media || '{}');
   $('#content').insertAdjacentHTML('beforeend', '<section class="paper"><h2>Фото профиля</h2><div class="actions" id="profile-gallery"></div></section>');
   renderGalleryPreview($('#profile-gallery'), details, () => editTemplateMedia({title:user.name,details}, true));
-  if (isCoach) renderCoachBioLists(user.coach_bio);
+  if (isCoach) {
+    renderCoachSocialAccounts();
+    renderCoachBioLists(user.coach_bio);
+  }
   const phone = $('#profile-form input[name=phone]');
   const telephone = window.intlTelInput?.(phone, {
     initialCountry:'ru', separateDialCode:true, strictMode:true,
@@ -315,7 +328,9 @@ function adminCoachProfile(id) {
   adminBreadcrumb('Тренеры', 'Профиль тренера');
   const details = JSON.parse(coach.profile_media || '{}');
   renderGalleryPreview($('#coach-photos'),details,()=>editTemplateMedia({coach:id,title:coach.name,details},true));
+  renderCoachSocialAccounts();
   renderCoachBioLists(coach.coach_bio);
+  renderCoachDelete(coach);
   const phone = $('#profile-form input[name=phone]');
   const telephone = window.intlTelInput?.(phone, {initialCountry:'ru',separateDialCode:true,strictMode:true,loadUtils:()=>import('https://cdn.jsdelivr.net/npm/intl-tel-input@25.2.1/build/js/utils.js')});
   $('#profile-form').onsubmit = event => {
@@ -335,7 +350,7 @@ function adminCoachProfile(id) {
 }
 
 function adminBreadcrumb(section, current) {
-  const routes = {'Упражнения':'library', 'Тренеры':'trainers', 'Справочники':'references'};
+  const routes = {'Клиенты':state.user.role==='admin'?'admin-clients':'clients', 'Упражнения':'library', 'Тренеры':'trainers', 'Справочники':'references'};
   const nav = document.createElement('nav');
   nav.setAttribute('aria-label', 'Навигационная цепочка');
   nav.innerHTML = `<ol class="breadcrumb exercise-breadcrumb">
@@ -369,4 +384,88 @@ function withCoachBio(fields) {
     achievements:lines(achievements),
     specializations:lines(specializations)
   }};
+}
+
+async function showAdminDashboard() {
+  const content = $('#content');
+  const dashboard = document.createElement('section');
+  dashboard.textContent = 'Загрузка статистики…';
+  content.append(dashboard);
+  try {
+    const {counts, started_at} = await api('admin-dashboard');
+    if (!dashboard.isConnected) return;
+    const date = new Intl.DateTimeFormat('ru-RU', {timeZone:'Europe/Moscow'}).format(new Date(started_at.replace(' ', 'T') + 'Z'));
+    const periods = ['за неделю', 'за месяц', 'за год'];
+    dashboard.innerHTML = `<div class="row g-3">${[['coach','Тренеры'],['user','Клиенты']].map(([role,title])=>`
+      <div class="col-12 col-lg-6"><section class="paper">
+        <h2>${title} — всего ${counts[role].total}</h2>
+        <ul class="list-unstyled dashboard-changes">${periods.map((period,index)=>{
+          const change = counts[role].changes[index];
+          return `<li><strong>${change > 0 ? '+' : ''}${change}</strong> ${period}</li>`;
+        }).join('')}</ul>
+      </section></div>`).join('')}</div>
+      <p class="muted">Изменения учитываются с ${date}.</p>`;
+  } catch (error) {
+    if (dashboard.isConnected) dashboard.textContent = 'Статистика недоступна. Обновите страницу.';
+  }
+}
+
+function renderCoachDelete(coach) {
+  const restoring = Boolean(coach.is_del);
+  const content = $('#content');
+  content.insertAdjacentHTML('beforeend', `<section class="paper coach-delete">
+    <h2>${restoring ? "Восстановление аккаунта" : "Удаление аккаунта"}</h2>
+     ${restoring ? '<p>Аккаунт удалён.</p>' : ''}
+      <div class="form-field">
+        <div class="switch"><input type="checkbox" id="confirm-coach-delete" role="switch" switch></div>
+        <label for="confirm-coach-delete">Подтверждаю ${restoring ? "восстановление" : "удаление"} аккаунта тренера</label>
+      </div>
+      <button type="button" class="secondary" id="delete-coach" disabled>${restoring ? "Восстановить" : "Удалить"}</button>
+  </section>`);
+  const confirm = $('#confirm-coach-delete');
+  const button = $('#delete-coach');
+  confirm.onchange = () => { button.disabled = !confirm.checked; };
+  button.onclick = () => run(async () => {
+    if (!confirm.checked || button.disabled) return;
+    button.disabled = true;
+    confirm.disabled = true;
+    try {
+      await api(restoring ? 'account-restore' : 'account-delete', {id:coach.id});
+      await load();
+    } finally {
+      confirm.disabled = false;
+      confirm.checked = false;
+      button.disabled = true;
+    }
+  });
+}
+
+function adminClients() {
+  const clients = state.users.filter(user => user.role === 'user');
+  $('#content').innerHTML = `<h1>Клиенты</h1><div class="table-responsive clients-table">
+    <table class="table table-striped align-top"><thead><tr><th>№</th><th>Аватар</th><th>ФИО</th><th>Телефон</th></tr></thead>
+      <tbody>${clients.map((client,index) => `<tr class="${client.is_del ? 'deleted-account' : ''}">
+        <th scope="row">${index+1}</th><td>${clientAvatar(client)}</td><td><a href="/?client=${client.id}">${esc(client.name)}</a></td>
+        <td>${esc(formatClientPhone(client.phone))}</td>
+      </tr>`).join('') || '<tr><td colspan="4">Клиентов пока нет.</td></tr>'}</tbody>
+    </table></div>`;
+  adminBreadcrumb('Клиенты');
+}
+
+function renderCoachSocialAccounts() {
+  const providers = ['VK', 'Telegram', 'Одноклассники', 'Дзен', 'Instagram', 'TikTok', 'TenChat'];
+  $('#content').insertAdjacentHTML('beforeend', `
+    <section class="paper social-accounts" aria-labelledby="social-accounts-title">
+      <div class="social-accounts-header">
+        <h2 id="social-accounts-title">Связанные аккаунты</h2>
+        <span class="tag">0 из ${providers.length}</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        ${providers.map(provider => `<li class="list-group-item">
+          <div><strong>${provider}</strong><br><small>Не подключён</small></div>
+          <button type="button" class="secondary" disabled aria-label="Привязать ${provider}">Привязать</button>
+        </li>`).join('')}
+      </ul>
+      <p class="muted">Привязка станет доступна после настройки входа через соцсети.</p>
+    </section>`);
 }
