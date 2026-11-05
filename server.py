@@ -7,8 +7,17 @@ from http.cookies import SimpleCookie
 ROOT = Path(__file__).parent
 DB = ROOT / 'data' / 'app.sqlite3'
 SESSIONS = {}
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL:
+    import postgres_backend
+
+INTEGRITY_ERRORS = (sqlite3.IntegrityError, postgres_backend.psycopg.IntegrityError) if DATABASE_URL else (sqlite3.IntegrityError,)
 @contextmanager
 def connect():
+    if DATABASE_URL:
+        with postgres_backend.connect(DATABASE_URL) as connection:
+            yield connection
+        return
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
     try:
@@ -34,15 +43,31 @@ def save_coach_bio(db, user_id, body):
 
 
 def init():
+    if DATABASE_URL:
+        with connect() as connection:
+            postgres_backend.initialize(connection)
+        return
     DB.parent.mkdir(exist_ok=True)
     demo_file = DB.parent / 'demo-password.txt'
     new_demo_password = not demo_file.exists()
     if new_demo_password:
         demo_file.write_text(secrets.token_urlsafe(18), encoding='utf8')
-    demo_password = demo_file.read_text(encoding='utf8').strip()
+    with demo_file.open('rb') as credentials:
+        demo_password = credentials.readline().strip().decode('ascii')
     with connect() as c:
         c.executescript('''CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,name TEXT,email TEXT UNIQUE,role TEXT,salt TEXT,hash TEXT,coach INTEGER);
 CREATE TABLE IF NOT EXISTS exercises(id INTEGER PRIMARY KEY,name TEXT,instruction TEXT,media TEXT);
+CREATE TABLE IF NOT EXISTS social_accounts_provider (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS social_accounts (
+    id INTEGER PRIMARY KEY,
+    id_provider INTEGER NOT NULL REFERENCES social_accounts_provider(id),
+    id_user INTEGER NOT NULL REFERENCES users(id),
+    id_provider_user_id INTEGER NOT NULL,
+    UNIQUE(id_provider, id_provider_user_id)
+);
 CREATE TABLE IF NOT EXISTS workouts(id INTEGER PRIMARY KEY,title TEXT,client INTEGER,coach INTEGER,items TEXT);
 CREATE TABLE IF NOT EXISTS results(workout INTEGER,client INTEGER,payload TEXT,updated TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(workout,client));''')
         from reference_data import initialize_references
@@ -50,12 +75,52 @@ CREATE TABLE IF NOT EXISTS results(workout INTEGER,client INTEGER,payload TEXT,u
         if not any(row['name'] == 'gallery' for row in c.execute('PRAGMA table_info(exercises)')):
             c.execute("ALTER TABLE exercises ADD COLUMN gallery TEXT NOT NULL DEFAULT '[]'")
         user_columns = {row['name'] for row in c.execute('PRAGMA table_info(users)')}
+        if 'is_del' not in user_columns:
+            c.execute('ALTER TABLE users ADD COLUMN is_del INTEGER NOT NULL DEFAULT 0 CHECK(is_del IN (0,1))')
+        if 'registered_at' not in user_columns:
+            c.execute('ALTER TABLE users ADD COLUMN registered_at TEXT')
         for field in ('surname', 'given_name', 'patronymic', 'phone', 'profile_media', 'coach_bio'):
             if field not in user_columns:
                 c.execute(f"ALTER TABLE users ADD COLUMN {field} TEXT NOT NULL DEFAULT ''")
         columns = {row['name'] for row in c.execute('PRAGMA table_info(workouts)')}
         if 'details' not in columns:
             c.execute("ALTER TABLE workouts ADD COLUMN details TEXT NOT NULL DEFAULT '{}'")
+        c.executescript('''
+            CREATE TABLE IF NOT EXISTS account_count_tracking (
+                id INTEGER PRIMARY KEY CHECK(id=1), started_at TEXT NOT NULL
+            );
+            INSERT OR IGNORE INTO account_count_tracking VALUES (1, CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS account_count_events (
+                role TEXT NOT NULL, delta INTEGER NOT NULL, occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+        c.execute('BEGIN IMMEDIATE')
+        if not any(row['name'] == 'user_id' for row in c.execute('PRAGMA table_info(account_count_events)')):
+            c.execute('ALTER TABLE account_count_events ADD COLUMN user_id INTEGER')
+        for trigger in ('set_account_registration', 'count_account_insert', 'count_account_delete', 'count_account_soft_delete'):
+            c.execute(f'DROP TRIGGER IF EXISTS {trigger}')
+        c.execute('''
+            CREATE TRIGGER count_account_insert AFTER INSERT ON users
+            BEGIN
+                UPDATE users SET registered_at=COALESCE(NEW.registered_at, CURRENT_TIMESTAMP) WHERE id=NEW.id;
+                INSERT INTO account_count_events(role,delta,occurred_at,user_id)
+                    SELECT role,1,registered_at,id FROM users WHERE id=NEW.id AND role IN ('coach','user');
+            END
+        ''')
+        c.execute('''
+            CREATE TRIGGER count_account_soft_delete AFTER UPDATE OF is_del ON users
+            WHEN OLD.is_del=0 AND NEW.is_del=1 AND OLD.role IN ('coach','user')
+            BEGIN
+                INSERT INTO account_count_events(role,delta,user_id) VALUES (OLD.role,-1,OLD.id);
+            END
+        ''')
+        c.execute('''
+            CREATE TRIGGER IF NOT EXISTS count_account_restore AFTER UPDATE OF is_del ON users
+            WHEN OLD.is_del=1 AND NEW.is_del=0 AND NEW.role IN ('coach','user')
+            BEGIN
+                INSERT INTO account_count_events(role,delta,user_id) VALUES (NEW.role,1,NEW.id);
+            END
+        ''')
         if c.execute('SELECT count(*) FROM users').fetchone()[0]:
             if new_demo_password:
                 for role in ('user', 'coach', 'admin'):
@@ -111,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
         cookie = SimpleCookie(self.headers.get('Cookie', '')).get('session')
         uid = SESSIONS.get(cookie.value) if cookie else None
         with connect() as db:
-            user = db.execute('SELECT role FROM users WHERE id=?', (uid,)).fetchone()
+            user = db.execute('SELECT role FROM users WHERE id=? AND is_del=0', (uid,)).fetchone()
         if not user or user['role'] not in ('coach','user','admin'):
             return self.respond(403, {'error': 'Upload forbidden'})
         suffix = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp',
@@ -143,13 +208,24 @@ class Handler(BaseHTTPRequestHandler):
             cookies=SimpleCookie(self.headers.get('Cookie','')); token=cookies.get('session'); uid=SESSIONS.get(token.value) if token else None
             with connect() as c:
                 if self.path=='/api/login':
-                    u=c.execute('SELECT * FROM users WHERE email=?',(body.get('email'),)).fetchone()
+                    u=c.execute('SELECT * FROM users WHERE email=? AND is_del=0',(body.get('email'),)).fetchone()
                     if not u or not secrets.compare_digest(u['hash'],password(body.get('password',''),u['salt'])):return self.respond(401,{'error':'Неверная почта или пароль'})
                     t=secrets.token_hex(32);SESSIONS[t]=u['id'];return self.respond(200,{'ok':True},f'session={t}; HttpOnly; SameSite=Strict; Path=/')
                 if not uid:return self.respond(401,{'error':'Войдите в аккаунт'})
-                u=c.execute('SELECT id,name,email,role,coach,surname,given_name,patronymic,phone,profile_media,coach_bio FROM users WHERE id=?',(uid,)).fetchone();role=u['role']
+                u=c.execute('SELECT id,name,email,role,coach,surname,given_name,patronymic,phone,profile_media,coach_bio FROM users WHERE id=? AND is_del=0',(uid,)).fetchone()
+                if not u: return self.respond(401, {'error':'Войдите в аккаунт'})
+                role=u['role']
                 if self.path=='/api/logout':
                     SESSIONS.pop(token.value,None);return self.respond(200,{'ok':True},'session=; Max-Age=0; Path=/')
+                if self.path == '/api/account-restore' and method == 'POST' and role == 'admin':
+                    c.execute("UPDATE users SET is_del=0 WHERE id=? AND role='coach' AND is_del=1", (int(body['id']),))
+                    c.commit()
+                    return self.respond(200, {'ok':True})
+                if self.path == '/api/account-delete' and method == 'POST' and role == 'admin':
+                    c.execute("UPDATE users SET is_del=1 WHERE id=? AND role IN ('coach','user') AND is_del=0",
+                              (int(body['id']),))
+                    c.commit()
+                    return self.respond(200, {'ok':True})
                 if self.path=='/api/references':
                     if role != 'admin':
                         return self.respond(403, {'error':'Нет доступа'})
@@ -184,9 +260,23 @@ class Handler(BaseHTTPRequestHandler):
                             c.execute('INSERT INTO tags(group_id,name) VALUES(?,?)',(group,name))
                     c.commit()
                     return self.respond(200, {'ok':True})
+                if self.path == '/api/admin-dashboard' and method == 'GET':
+                    if role != 'admin':
+                        return self.respond(403, {'error':'Нет доступа'})
+                    counts = {}
+                    for account_role in ('coach', 'user'):
+                        total = c.execute('SELECT COUNT(*) FROM users WHERE role=? AND is_del=0', (account_role,)).fetchone()[0]
+                        changes = [
+                            c.execute("SELECT COALESCE(SUM(delta),0) FROM account_count_events WHERE role=? AND occurred_at>=datetime('now',?)",
+                                      (account_role, f'-{days} days')).fetchone()[0]
+                            for days in (7, 30, 365)
+                        ]
+                        counts[account_role] = {'total':total, 'changes':changes}
+                    started_at = c.execute('SELECT started_at FROM account_count_tracking').fetchone()[0]
+                    return self.respond(200, {'counts':counts, 'started_at':started_at})
                 if self.path=='/api/state':
-                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach,phone,surname,given_name,patronymic,profile_media,coach_bio FROM users') if role=='admin' or x['id']==uid or (role=='coach' and x['coach']==uid)]
-                    workouts=[dict(x) for x in c.execute('SELECT * FROM workouts') if role=='admin' or x['client']==uid or (role=='coach' and x['coach']==uid)]
+                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach,phone,surname,given_name,patronymic,profile_media,coach_bio,is_del FROM users') if role=='admin' or (not x['is_del'] and (x['id']==uid or (role=='coach' and x['coach']==uid)))]
+                    workouts=[dict(x) for x in c.execute('SELECT * FROM workouts') if role=='admin' or x['client']==uid or (role=='coach' and x['coach']==uid and (x['client'] is None or any(client['id']==x['client'] for client in users)))]
                     for w in workouts:
                         w['details']=json.loads(w['details']); w['items']=json.loads(w['items']); r=c.execute('SELECT payload,updated FROM results WHERE workout=? AND client=?',(w['id'],w['client'])).fetchone();w['result']=json.loads(r['payload']) if r else {};w['updated']=r['updated'] if r else None
                     return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT * FROM exercises')],workouts=workouts))
@@ -249,7 +339,7 @@ class Handler(BaseHTTPRequestHandler):
                     account_role = 'coach' if self.path=='/api/coach-create' else 'user'
                     editing = self.path=='/api/client-edit'
                     client_id = body.get('id') if editing else None
-                    if editing and not c.execute("SELECT 1 FROM users WHERE id=? AND coach=? AND role='user'",(client_id,uid)).fetchone():
+                    if editing and not c.execute("SELECT 1 FROM users WHERE id=? AND coach=? AND role='user' AND is_del=0",(client_id,uid)).fetchone():
                         return self.respond(404, {'error':'Client unavailable'})
                     surname = body['surname'].strip()
                     given_name = body['given_name'].strip()
@@ -272,19 +362,18 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(200, {'email':email})
                     temporary_password = secrets.token_urlsafe(18)
                     salt = secrets.token_hex(16)
-                    c.execute('INSERT INTO users(name,email,role,salt,hash,coach,surname,given_name,patronymic,phone) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                              (name,email,account_role,salt,password(temporary_password,salt),uid if account_role=='user' else None,surname,given_name,patronymic,phone))
-                    client_id = c.execute('SELECT last_insert_rowid()').fetchone()[0]
+                    client_id = c.execute('INSERT INTO users(name,email,role,salt,hash,coach,surname,given_name,patronymic,phone) VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING id',
+                              (name,email,account_role,salt,password(temporary_password,salt),uid if account_role=='user' else None,surname,given_name,patronymic,phone)).fetchone()[0]
                     if account_role == 'coach':
                         save_coach_bio(c, client_id, body)
                     c.commit()
                     return self.respond(201, {'id':client_id,'email':email,'password':temporary_password})
                 if self.path=='/api/client-search' and role=='coach':
                     query = body['query'].strip().casefold()
-                    users = [dict(row) for row in c.execute("SELECT id,name,email,coach IS NULL AS available FROM users WHERE role='user'") if len(query)>=3 and any(query in row[key].casefold() for key in ('name','email'))]
+                    users = [dict(row) for row in c.execute("SELECT id,name,email,coach IS NULL AS available FROM users WHERE role='user' AND is_del=0") if len(query)>=3 and any(query in row[key].casefold() for key in ('name','email'))]
                     return self.respond(200, users[:30])
                 if self.path=='/api/client-link' and role=='coach':
-                    updated = c.execute("UPDATE users SET coach=? WHERE id=? AND role='user' AND coach IS NULL", (uid,body['id']))
+                    updated = c.execute("UPDATE users SET coach=? WHERE id=? AND role='user' AND is_del=0 AND coach IS NULL", (uid,body['id']))
                     if not updated.rowcount:
                         return self.respond(409, {'error':'Client unavailable'})
                 elif self.path=='/api/exercises' and role=='admin':
@@ -354,7 +443,7 @@ class Handler(BaseHTTPRequestHandler):
                             client_id = int(assignment['client'])
                             start = date.fromisoformat(assignment['from'])
                             end = date.fromisoformat(assignment['to'])
-                            if start > end or client_id in seen or not c.execute("SELECT 1 FROM users WHERE id=? AND coach=? AND role='user'",(client_id,uid)).fetchone():
+                            if start > end or client_id in seen or not c.execute("SELECT 1 FROM users WHERE id=? AND coach=? AND role='user' AND is_del=0",(client_id,uid)).fetchone():
                                 raise ValueError('Check client and assignment dates')
                             seen.add(client_id)
                             details = {**body['details'], 'period': {'from':start.isoformat(),'to':end.isoformat()}}
@@ -362,7 +451,7 @@ class Handler(BaseHTTPRequestHandler):
                                       (body['title'],client_id,uid,json.dumps(body['items']),json.dumps(details)))
                         return self.respond(200, {'ok':True})
                     client_id = body.get('client')
-                    client=c.execute('SELECT id FROM users WHERE id=? AND coach=?',(int(client_id),uid)).fetchone() if client_id else None
+                    client=c.execute('SELECT id FROM users WHERE id=? AND coach=? AND is_del=0',(int(client_id),uid)).fetchone() if client_id else None
                     if client_id and not client:raise ValueError('Клиент недоступен')
                     items=body['items']
                     if not items or len(items)>30:raise ValueError('Добавьте от 1 до 30 упражнений')
@@ -387,7 +476,7 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('INSERT INTO results(workout,client,payload) VALUES(?,?,?) ON CONFLICT(workout,client) DO UPDATE SET payload=excluded.payload,updated=CURRENT_TIMESTAMP',(w['id'],uid,json.dumps(body['result'])))
                 else:return self.respond(403,{'error':'Нет доступа к этому действию'})
                 return self.respond(200,{'ok':True})
-        except (ValueError,KeyError,TypeError,sqlite3.IntegrityError) as e:self.respond(400,{'error':str(e) if not isinstance(e,sqlite3.IntegrityError) else 'Такая почта уже зарегистрирована'})
+        except (ValueError,KeyError,TypeError) + INTEGRITY_ERRORS as e:self.respond(400,{'error':str(e) if not isinstance(e,INTEGRITY_ERRORS) else 'Такая почта уже зарегистрирована'})
 
 if __name__=='__main__':
     init()
