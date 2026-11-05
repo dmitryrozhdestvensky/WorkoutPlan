@@ -2,24 +2,24 @@ const coachBioEditors = {};
 
 function openCoachBioEditor(button, key) {
   const content = document.querySelector('#content');
-  const field = button.form.elements[key];
+  const field = document.querySelector('#profile-form').elements[key];
   const original = document.createDocumentFragment();
   original.append(...content.childNodes);
-  const isEducation = key === 'education';
+  const usesTable = key === 'education' || key === 'achievements' || key === 'specializations';
   content.innerHTML = `<button type="button" class="secondary" id="bio-back">Вернуться</button>
     <h1>${coachBioEditors[key]}</h1>
     <form class="paper" id="bio-editor">
-      ${isEducation ? '<div class="row gy-2 align-items-end"><div class="col-12 col-md-8"><label for="bio-items" class="form-label">Новая запись</label><input id="bio-items" class="form-control" maxlength="1000" required></div><div class="col-12 col-md-4"><button type="submit">Добавить</button></div></div>'
+      ${usesTable ? '<div class="row gy-2 align-items-end"><div class="col-12 col-md-8"><label for="bio-items" class="form-label">Новая запись</label><input id="bio-items" class="form-control" maxlength="1000" required></div><div class="col-12 col-md-4"><button type="submit">Добавить</button></div></div>'
         : '<label for="bio-items">Каждый пункт вводите с новой строки</label><textarea id="bio-items" rows="8"></textarea><button type="submit">Готово</button>'}
     </form>
-    ${isEducation ? '<div class="table-responsive clients-table"><table class="table table-striped align-top"><thead><tr><th scope="col">№</th><th scope="col" style="width:65%">Образование и сертификаты</th><th scope="col">Действия</th></tr></thead><tbody id="bio-rows"></tbody></table></div><div class="actions"><button type="button" id="bio-done">Готово</button></div>' : ''}`;
+    ${usesTable ? '<div class="table-responsive clients-table"><table class="table table-striped align-top"><thead><tr><th scope="col">№</th><th scope="col" style="width:65%">' + coachBioEditors[key] + '</th><th scope="col">Действия</th></tr></thead><tbody id="bio-rows"></tbody></table></div><div class="actions"><button type="button" id="bio-done">Сохранить изменения</button></div>' : ''}`;
   const items = content.querySelector('#bio-items');
   function back() {
     content.replaceChildren(original);
     button.focus();
   }
   content.querySelector('#bio-back').onclick = back;
-  if (state.user.role === 'admin' && key === 'education') {
+  if (state.user.role === 'admin' && usesTable) {
     content.querySelector('#bio-back').remove();
     adminBreadcrumb('Тренеры', coachBioEditors[key]);
     const current = content.querySelector('.breadcrumb [aria-current="page"]');
@@ -36,7 +36,7 @@ function openCoachBioEditor(button, key) {
     current.before(profile);
   }
   const editor = content.querySelector('#bio-editor');
-  if (isEducation) {
+  if (usesTable) {
     const entries = field.value.split(/\r?\n/).filter(line => line.trim());
     const rows = content.querySelector('#bio-rows');
     function drawRows() {
@@ -80,8 +80,28 @@ function openCoachBioEditor(button, key) {
     content.querySelector('#bio-done').onclick = () => {
       if (items.value.trim()) return toast('Нажмите «Добавить», чтобы включить новую запись в список');
       if (entries.some(entry => !entry.trim())) return toast('Заполните или удалите пустые записи');
-      field.value = entries.map(entry => entry.trim()).join('\n');
-      back();
+      const saveButton = content.querySelector('#bio-done');
+      const itemsToSave = entries.map(entry => entry.trim());
+      saveButton.disabled = true;
+      run(async () => {
+        try {
+          const coach = new URLSearchParams(location.search).get('coach');
+          const result = await api('coach-bio', {coach, section:key, items:itemsToSave});
+          const saved = JSON.stringify(result.bio);
+          const profile = state.user.role === 'admin'
+            ? state.users.find(user => user.id === Number(coach))
+            : state.user;
+          if (profile) profile.coach_bio = saved;
+          if (!saveButton.isConnected) return;
+          field.value = itemsToSave.join('\n');
+          back();
+          content.querySelector('.coach-qualifications')?.remove();
+          renderCoachBioLists(saved);
+          toast('Изменения сохранены');
+        } finally {
+          saveButton.disabled = false;
+        }
+      });
     };
     drawRows();
     items.focus();
@@ -94,4 +114,18 @@ function openCoachBioEditor(button, key) {
     back();
   };
   items.focus();
+}
+
+function renderCoachBioLists(saved) {
+  const bio = JSON.parse(saved || '{}');
+  const sections = Object.entries(coachBioEditors).map(([key, title]) => {
+    const entries = (bio[key] || []).map(entry => `<li class="list-group-item">${esc(entry)}</li>`).join('');
+    return `<details name="coach-qualifications" class="accordion-item">
+      <summary class="accordion-button">${esc(title)}</summary>
+      <div class="accordion-body"><ul class="list-group list-group-flush">
+        ${entries || '<li class="list-group-item muted">Записей пока нет.</li>'}
+      </ul><div class="list-group-item"><button type="button" class="secondary" onclick="openCoachBioEditor(this, '${key}')" aria-label="Добавить: ${esc(title)}">Добавить</button></div></div>
+    </details>`;
+  });
+  $('#content').insertAdjacentHTML('beforeend', `<div class="accordion coach-qualifications">${sections.join('')}</div>`);
 }
