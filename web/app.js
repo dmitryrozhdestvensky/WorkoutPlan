@@ -243,6 +243,7 @@ function coachProfile() {
   const details = JSON.parse(user.profile_media || '{}');
   $('#content').insertAdjacentHTML('beforeend', '<section class="paper"><h2>Фото профиля</h2><div class="actions" id="profile-gallery"></div></section>');
   renderGalleryPreview($('#profile-gallery'), details, () => editTemplateMedia({title:user.name,details}, true));
+  if (isCoach) renderCoachBioLists(user.coach_bio);
   const phone = $('#profile-form input[name=phone]');
   const telephone = window.intlTelInput?.(phone, {
     initialCountry:'ru', separateDialCode:true, strictMode:true,
@@ -314,6 +315,7 @@ function adminCoachProfile(id) {
   adminBreadcrumb('Тренеры', 'Профиль тренера');
   const details = JSON.parse(coach.profile_media || '{}');
   renderGalleryPreview($('#coach-photos'),details,()=>editTemplateMedia({coach:id,title:coach.name,details},true));
+  renderCoachBioLists(coach.coach_bio);
   const phone = $('#profile-form input[name=phone]');
   const telephone = window.intlTelInput?.(phone, {initialCountry:'ru',separateDialCode:true,strictMode:true,loadUtils:()=>import('https://cdn.jsdelivr.net/npm/intl-tel-input@25.2.1/build/js/utils.js')});
   $('#profile-form').onsubmit = event => {
@@ -353,9 +355,9 @@ function adminBreadcrumb(section, current) {
 
 function coachBioFields(saved) {
   const bio = JSON.parse(saved || '{}');
-  return `<div class="actions">${Object.entries(coachBioEditors).map(([key, title]) => `
+  return `<div class="actions">${Object.keys(coachBioEditors).map(key => `
     <input type="hidden" name="${key}" value="${esc((bio[key] || []).join('\n'))}">
-    <button type="button" class="secondary" onclick="openCoachBioEditor(this, '${key}')">${title} — добавить</button>
+
   `).join('')}</div>`;
 }
 
