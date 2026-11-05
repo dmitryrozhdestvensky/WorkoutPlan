@@ -207,6 +207,20 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('UPDATE users SET profile_media=? WHERE id=?',(json.dumps(media),target_uid))
                     c.commit()
                     return self.respond(200, {'ok':True})
+                if self.path == '/api/coach-bio' and method == 'POST' and role in ('coach', 'admin'):
+                    target_uid = int(body['coach']) if role == 'admin' else uid
+                    key = body['section']
+                    if key not in ('education', 'achievements', 'specializations'):
+                        raise ValueError('Неизвестный раздел профиля')
+                    c.execute('BEGIN IMMEDIATE')
+                    target = c.execute("SELECT coach_bio FROM users WHERE id=? AND role='coach'", (target_uid,)).fetchone()
+                    if not target:
+                        return self.respond(404, {'error':'Тренер не найден'})
+                    bio = json.loads(target['coach_bio'] or '{}')
+                    bio[key] = body['items']
+                    save_coach_bio(c, target_uid, {'bio':bio})
+                    c.commit()
+                    return self.respond(200, {'bio':bio})
                 if self.path=='/api/coach-profile' and role in ('coach','user','admin'):
                     target_uid = uid
                     if role == 'admin':
