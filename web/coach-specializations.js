@@ -1,0 +1,1 @@
+coachBioEditors.specializations = 'Фитнес-специализация';
