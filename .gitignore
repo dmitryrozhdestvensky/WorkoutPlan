@@ -1,2 +1,14 @@
 data/
+Data/
+Backups/
+TransferBackups/
+Reports/
+.venv/
 __pycache__/
+.env
+*.sqlite3
+*.backup
+*.log
+/WebCollector/Config/
+/database/
+/app/WorkoutPlan/
