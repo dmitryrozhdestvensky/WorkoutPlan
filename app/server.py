@@ -137,30 +137,30 @@ class Handler(BaseHTTPRequestHandler):
                     if method == 'GET':
                         return self.respond(200, {
                             'groups':[dict(row) for row in c.execute('SELECT * FROM tag_groups ORDER BY id')],
-                            'tags':[dict(row) for row in c.execute('SELECT * FROM tags ORDER BY id')]})
+                            'tags':[dict(row) for row in c.execute('SELECT id, group_id, name FROM tags WHERE archived_at IS NULL ORDER BY id')]})
                     name = body.get('name','').strip()
                     if body.get('action') == 'batch':
                         group = int(body['group'])
                         tags = body['tags']
-                        existing = {row['id'] for row in c.execute('SELECT id FROM tags WHERE group_id=?',(group,))}
+                        existing = {row['id'] for row in c.execute('SELECT id FROM tags WHERE group_id=? AND archived_at IS NULL',(group,))}
                         names = [tag['name'].strip() for tag in tags]
                         if {tag['id'] for tag in tags} != existing or len(tags)!=len(existing) or any(not 1<=len(value)<=80 for value in names) or len({value.casefold() for value in names})!=len(names):
                             raise ValueError('Проверьте названия тегов или обновите справочник')
                         for tag, name in zip(tags,names):
-                            c.execute('UPDATE tags SET name=? WHERE id=? AND group_id=?',(name,tag['id'],group))
+                            c.execute('UPDATE tags SET name=? WHERE id=? AND group_id=? AND archived_at IS NULL',(name,tag['id'],group))
                         c.commit()
                         return self.respond(200, {'ok':True})
                     if body.get('action') == 'delete':
-                        c.execute('DELETE FROM tags WHERE id=?',(int(body['id']),))
+                        c.execute('UPDATE tags SET archived_at=CURRENT_TIMESTAMP WHERE id=? AND archived_at IS NULL',(int(body['id']),))
                     else:
                         group = int(body['group'])
                         if not 1 <= len(name) <= 80 or not c.execute('SELECT 1 FROM tag_groups WHERE id=?',(group,)).fetchone():
                             raise ValueError('Проверьте группу и название')
-                        duplicate = any(row['name'].casefold()==name.casefold() and row['id']!=body.get('id') for row in c.execute('SELECT id,name FROM tags WHERE group_id=?',(group,)))
+                        duplicate = any(row['name'].casefold()==name.casefold() and row['id']!=body.get('id') for row in c.execute('SELECT id,name FROM tags WHERE group_id=? AND archived_at IS NULL',(group,)))
                         if duplicate:
                             raise ValueError('Такой тег уже существует')
                         if body.get('id'):
-                            c.execute('UPDATE tags SET name=? WHERE id=? AND group_id=?',(name,int(body['id']),group))
+                            c.execute('UPDATE tags SET name=? WHERE id=? AND group_id=? AND archived_at IS NULL',(name,int(body['id']),group))
                         else:
                             c.execute('INSERT INTO tags(group_id,name) VALUES(?,?)',(group,name))
                     c.commit()
@@ -184,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
                     workouts=[dict(x) for x in c.execute('SELECT * FROM workouts') if role=='admin' or x['client']==uid or (role=='coach' and x['coach']==uid and (x['client'] is None or any(client['id']==x['client'] for client in users)))]
                     for w in workouts:
                         w['details']=json.loads(w['details']); w['items']=json.loads(w['items']); r=c.execute('SELECT payload,updated FROM results WHERE workout=? AND client=?',(w['id'],w['client'])).fetchone();w['result']=json.loads(r['payload']) if r else {};w['updated']=r['updated'] if r else None
-                    return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT * FROM exercises')],workouts=workouts))
+                    return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT e.*, ARRAY(SELECT tag_id FROM exercise_tags WHERE exercise_id=e.id ORDER BY tag_id) AS tag_ids, ARRAY(SELECT t.name FROM exercise_tags et JOIN tags t ON t.id=et.tag_id WHERE et.exercise_id=e.id AND t.archived_at IS NULL ORDER BY t.group_id,t.id) AS tag_names FROM exercises e')],workouts=workouts))
                 if method!='POST':return self.respond(404,{'error':'Не найдено'})
                 if self.path=='/api/profile-media' and role in ('coach','user','admin'):
                     target_uid = uid
@@ -309,6 +309,19 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         c.execute('INSERT INTO exercises(name,instruction,media,gallery) VALUES(?,?,?,?)',
                                   (name,body.get('instruction',''),media,json.dumps(gallery)))
+                    if 'id' in body and 'tag_ids' in body:
+                        exercise_id = int(body['id'])
+                        tag_ids = body['tag_ids']
+                        if not isinstance(tag_ids, list) or any(type(tag) is not int for tag in tag_ids):
+                            raise ValueError('Проверьте выбранные теги')
+                        existing = {row['id'] for row in c.execute(
+                            'SELECT id FROM tags WHERE id = ANY(?) AND archived_at IS NULL FOR SHARE', (tag_ids,))}
+                        if existing != set(tag_ids):
+                            raise ValueError('Справочник изменился. Откройте упражнение заново.')
+                        c.execute('DELETE FROM exercise_tags WHERE exercise_id=? AND tag_id IN (SELECT id FROM tags WHERE archived_at IS NULL)', (exercise_id,))
+                        for tag_id in sorted(existing):
+                            c.execute('INSERT INTO exercise_tags(exercise_id, tag_id) VALUES(?,?)',
+                                      (exercise_id, tag_id))
                     c.commit()
                 elif self.path=='/api/trainers' and role=='admin':
                     if len(body['password'])<8:raise ValueError('Пароль должен содержать не менее 8 символов')

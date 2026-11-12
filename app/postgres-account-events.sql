@@ -19,3 +19,16 @@ DROP TRIGGER IF EXISTS workoutplan_account_events ON users;
 CREATE TRIGGER workoutplan_account_events
 BEFORE INSERT OR UPDATE OF is_del ON users
 FOR EACH ROW EXECUTE FUNCTION workoutplan_track_account();
+
+CREATE TABLE IF NOT EXISTS exercise_tags (
+    exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (exercise_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS exercise_tags_tag_idx ON exercise_tags(tag_id);
+UPDATE tag_groups SET name = 'Группа мышц' WHERE name = 'Мышцы';
+UPDATE tag_groups SET name = 'Зона тела' WHERE name = 'Часть тела';
+UPDATE tag_groups SET name = 'Сложность' WHERE name = 'Сложность техники';
+UPDATE tag_groups SET name = 'Особенности' WHERE name = 'Способ выполнения';
+
+ALTER TABLE tags ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
