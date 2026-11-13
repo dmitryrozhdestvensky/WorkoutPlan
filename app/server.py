@@ -36,6 +36,53 @@ def save_coach_bio(db, user_id, body):
     db.execute('UPDATE users SET coach_bio=? WHERE id=?', (json.dumps(cleaned), user_id))
 
 
+LOCATION_KEY = secrets.token_bytes(32)
+
+def city_query(query):
+    from urllib.request import Request, urlopen
+    key = os.environ.get('DADATA_API_KEY', '').strip()
+    if not key:
+        config = ROOT.parent / 'WebCollector' / 'Config' / '.env'
+        if config.is_file():
+            for line in config.read_text(encoding='utf-8-sig').splitlines():
+                name, separator, value = line.partition('=')
+                if separator and name.strip() == 'DADATA_API_KEY':
+                    key = value.strip()
+                    break
+    key_file = DATA_DIR / 'dadata-api-key.txt'
+    if not key and key_file.is_file():
+        key = key_file.read_text(encoding='utf-8-sig').strip()
+    if not key or len(query) < 2:
+        return []
+    import hmac
+    language = 'en' if re.search(r'[a-zA-Z]', query) and not re.search(r'[А-Яа-яЁё]', query) else 'ru'
+    request = Request(
+        'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address',
+        data=json.dumps({'query': query, 'count': 15, 'language': language,
+                         'locations': [{'country': '*'}],
+                         'from_bound': {'value': 'city'}, 'to_bound': {'value': 'settlement'}}).encode(),
+        headers={'Authorization': 'Token ' + key, 'Content-Type': 'application/json'})
+    with urlopen(request, timeout=4) as response:
+        suggestions = json.load(response)['suggestions']
+    results = {}
+    for item in suggestions:
+        data = item['data']
+        city = data.get('settlement') or data.get('city')
+        country = data.get('country')
+        if not city or not country:
+            continue
+        location = {'country':country, 'code':data.get('country_iso_code'),
+                    'region':data.get('region_with_type') or data.get('region'),
+                    'city':city, 'id':data.get('fias_id') or data.get('geoname_id')}
+        payload = json.dumps(location, ensure_ascii=False)
+        token = hmac.digest(LOCATION_KEY, payload.encode(), 'sha256').hex() + ':' + payload
+        label = country + ', ' + city
+        if location['region'] and location['region'].casefold() != city.casefold():
+            label += ' · ' + location['region']
+        results.setdefault(label, token)
+    return [{'label':label, 'token':token} for label,token in results.items()]
+
+
 def init():
     with connect() as connection:
         postgres_backend.initialize(connection)
@@ -56,8 +103,10 @@ class Handler(BaseHTTPRequestHandler):
         if cookie:self.send_header('Set-Cookie',cookie)
         self.end_headers();self.wfile.write(raw)
     def do_GET(self):
-        from urllib.parse import urlsplit
-        self.path = urlsplit(self.path).path
+        from urllib.parse import parse_qs, urlsplit
+        url = urlsplit(self.path)
+        self.query = parse_qs(url.query)
+        self.path = url.path
         if self.path.startswith('/api/'):return self.api('GET')
         if re.fullmatch(r'/uploads/(?:(?:admin|coach|user)/[0-9]{4}/[0-9]{2}/[0-9]{2}/)?[a-f0-9]{32}[.](jpg|png|webp|mp4|webm)', self.path):
             path = DATA_DIR / 'uploads' / self.path.removeprefix('/uploads/')
@@ -120,6 +169,16 @@ class Handler(BaseHTTPRequestHandler):
                 u=c.execute('SELECT id,name,email,role,coach,surname,given_name,patronymic,phone,profile_media,coach_bio FROM users WHERE id=? AND is_del=0',(uid,)).fetchone()
                 if not u: return self.respond(401, {'error':'Войдите в аккаунт'})
                 role=u['role']
+                if method == 'GET' and self.path == '/api/geography':
+                    query = self.query.get('q', [''])[0].strip()[:100]
+                    try:
+                        return self.respond(200, city_query(query))
+                    except OSError:
+                        return self.respond(503, {'error':'Подсказки городов временно недоступны'})
+                if self.path == '/api/state':
+                    u.update(c.execute("""
+                        SELECT profile_location FROM users WHERE id=?
+                    """, (uid,)).fetchone())
                 if self.path=='/api/logout':
                     SESSIONS.pop(token.value,None);return self.respond(200,{'ok':True},'session=; Max-Age=0; Path=/')
                 if self.path == '/api/account-restore' and method == 'POST' and role == 'admin':
@@ -179,12 +238,123 @@ class Handler(BaseHTTPRequestHandler):
                         counts[account_role] = {'total':total, 'changes':changes}
                     started_at = c.execute('SELECT started_at FROM account_count_tracking').fetchone()[0]
                     return self.respond(200, {'counts':counts, 'started_at':started_at})
+                if self.path in ('/api/clients', '/api/coaches') and method == 'GET':
+                    coaches = self.path == '/api/coaches'
+                    if role not in ('admin', 'coach') or (coaches and role != 'admin'):
+                        return self.respond(403, {'error':'Нет доступа'})
+                    requested = max(1, int(self.query.get('page', ['1'])[0]))
+                    page_size = 10
+                    scope = "role='coach'" if coaches else "role='user'"
+                    params = ()
+                    if role == 'coach':
+                        scope += ' AND coach=? AND is_del=0'
+                        params = (uid,)
+                    total = c.execute(f'SELECT count(*) FROM users WHERE {scope}', params).fetchone()[0]
+                    pages = max(1, (total + page_size - 1) // page_size)
+                    current = min(requested, pages)
+                    offset = (current - 1) * page_size
+                    clients = [dict(row) for row in c.execute(
+                        f'SELECT id,name,email,phone,surname,given_name,patronymic,profile_media,is_del '
+                        f'FROM users WHERE {scope} ORDER BY id LIMIT ? OFFSET ?',
+                        (*params, page_size, offset))]
+                    if coaches:
+                        for coach in clients:
+                            coach['client_count'] = c.execute(
+                                "SELECT count(*) FROM users WHERE role='user' AND is_del=0 AND coach=?",
+                                (coach['id'],)).fetchone()[0]
+                    elif role == 'coach':
+                        for client in clients:
+                            client['workouts'] = [row['title'] for row in c.execute(
+                                'SELECT title FROM workouts WHERE coach=? AND client=? ORDER BY id',
+                                (uid, client['id']))]
+                    return self.respond(200, dict(clients=clients, page=current, pages=pages, offset=offset))
+                if self.path == '/api/exercise-stats' and method == 'GET':
+                    if role not in ('admin', 'coach'):
+                        return self.respond(403, {'error':'Нет доступа'})
+                    stats = dict(c.execute("""
+                        SELECT count(*) AS total,
+                               count(*) FILTER (WHERE EXISTS (
+                                   SELECT 1 FROM jsonb_array_elements(gallery::jsonb) AS photo
+                                   WHERE photo->>'type' = 'photo' AND COALESCE(photo->>'url', '') <> ''
+                               ) OR split_part(split_part(media, chr(63), 1), '#', 1)
+                                 ~* '[.](jpg|jpeg|png|webp|gif|avif)$') AS with_photo,
+                               count(*) FILTER (WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '1 month') AS recent,
+                               count(*) FILTER (WHERE created_at IS NULL) AS unknown_dates
+                        FROM exercises
+                    """).fetchone())
+                    stats['used'] = c.execute("""
+                        SELECT count(DISTINCT e.id)
+                        FROM workouts w
+                        JOIN users u ON u.id=w.coach AND u.role='coach'
+                        CROSS JOIN LATERAL jsonb_array_elements(w.items::jsonb) AS item
+                        JOIN exercises e ON e.id = CASE
+                            WHEN item->>'exercise' ~ '^[0-9]{1,10}$'
+                            THEN (item->>'exercise')::bigint
+                        END
+                    """).fetchone()[0]
+                    stats['load_types'] = [dict(row) for row in c.execute("""
+                        SELECT t.name, count(et.exercise_id) AS total
+                        FROM tags t
+                        JOIN tag_groups g ON g.id=t.group_id
+                        LEFT JOIN exercise_tags et ON et.tag_id=t.id
+                        WHERE g.name=? AND t.archived_at IS NULL
+                        GROUP BY t.id, t.name
+                        ORDER BY t.id
+                    """, ('Тип нагрузки',))]
+                    return self.respond(200, stats)
+                if self.path == '/api/coach-programs':
+                    if role != 'coach':
+                        return self.respond(403, {'error':'Нет доступа'})
+                    if method == 'GET':
+                        programs = [dict(row) for row in c.execute(
+                            'SELECT id, title, duration, items FROM coach_programs WHERE coach_id=? ORDER BY id DESC', (uid,))]
+                        return self.respond(200, programs)
+                    title = body['title'].strip()
+                    duration = body['duration']
+                    items = body['items']
+                    if not 1 <= len(title) <= 100 or duration not in (7, 30) or not isinstance(items, list) or not 1 <= len(items) <= 90:
+                        raise ValueError('Укажите название, срок и хотя бы одну тренировку')
+                    if any(not isinstance(item, dict) or type(item.get('day')) is not int
+                           or not 1 <= item['day'] <= duration or type(item.get('template')) is not int for item in items):
+                        raise ValueError('Проверьте дни и тренировки программы')
+                    template_ids = {item['template'] for item in items}
+                    available = {row['id'] for row in c.execute(
+                        'SELECT id FROM workouts WHERE coach=? AND client IS NULL AND id=ANY(?)',
+                        (uid, list(template_ids)))}
+                    if available != template_ids:
+                        raise ValueError('Выберите шаблоны из своих тренировок')
+                    if body.get('id') is None:
+                        c.execute('INSERT INTO coach_programs(coach_id,title,duration,items) VALUES(?,?,?,?::jsonb)',
+                                  (uid,title,duration,json.dumps(items)))
+                    elif not c.execute('UPDATE coach_programs SET title=?,duration=?,items=?::jsonb WHERE id=? AND coach_id=? RETURNING id',
+                                       (title,duration,json.dumps(items),int(body['id']),uid)).fetchone():
+                        return self.respond(404, {'error':'Программа не найдена'})
+                    c.commit()
+                    return self.respond(200, {'ok':True})
                 if self.path=='/api/state':
-                    users=[dict(x) for x in c.execute('SELECT id,name,email,role,coach,phone,surname,given_name,patronymic,profile_media,coach_bio,is_del FROM users') if role=='admin' or (not x['is_del'] and (x['id']==uid or (role=='coach' and x['coach']==uid)))]
-                    workouts=[dict(x) for x in c.execute('SELECT * FROM workouts') if role=='admin' or x['client']==uid or (role=='coach' and x['coach']==uid and (x['client'] is None or any(client['id']==x['client'] for client in users)))]
+                    columns = 'id,name,email,role,coach,phone,surname,given_name,patronymic,profile_media,coach_bio,is_del'
+                    if role == 'admin':
+                        client_id = self.query.get('client', [''])[0]
+                        client_id = int(client_id) if client_id.isdecimal() else None
+                        coach_id = self.query.get('coach', [''])[0]
+                        coach_id = int(coach_id) if coach_id.isdecimal() else None
+                        users = [dict(row) for row in c.execute(
+                            f"SELECT {columns} FROM users WHERE (role='coach' AND id=?) OR (role='user' AND id=?)",
+                            (coach_id, client_id))]
+                        workouts = [dict(row) for row in c.execute('SELECT * FROM workouts WHERE client=?', (client_id,))]
+                    else:
+                        users = [dict(row) for row in c.execute(
+                            f'SELECT {columns} FROM users WHERE is_del=0 AND (id=? OR coach=?)',
+                            (uid, uid if role == 'coach' else None))]
+                        if role == 'coach':
+                            workouts = [dict(row) for row in c.execute(
+                                'SELECT w.* FROM workouts w WHERE w.coach=? AND (w.client IS NULL OR EXISTS '
+                                '(SELECT 1 FROM users WHERE id=w.client AND coach=? AND is_del=0))', (uid, uid))]
+                        else:
+                            workouts = [dict(row) for row in c.execute('SELECT * FROM workouts WHERE client=?', (uid,))]
                     for w in workouts:
                         w['details']=json.loads(w['details']); w['items']=json.loads(w['items']); r=c.execute('SELECT payload,updated FROM results WHERE workout=? AND client=?',(w['id'],w['client'])).fetchone();w['result']=json.loads(r['payload']) if r else {};w['updated']=r['updated'] if r else None
-                    return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT e.*, ARRAY(SELECT tag_id FROM exercise_tags WHERE exercise_id=e.id ORDER BY tag_id) AS tag_ids, ARRAY(SELECT t.name FROM exercise_tags et JOIN tags t ON t.id=et.tag_id WHERE et.exercise_id=e.id AND t.archived_at IS NULL ORDER BY t.group_id,t.id) AS tag_names FROM exercises e')],workouts=workouts))
+                    return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT e.*, ARRAY(SELECT tag_id FROM exercise_tags WHERE exercise_id=e.id ORDER BY tag_id) AS tag_ids, ARRAY(SELECT t.name FROM exercise_tags et JOIN tags t ON t.id=et.tag_id WHERE et.exercise_id=e.id AND t.archived_at IS NULL ORDER BY t.group_id,t.id) AS tag_names, ARRAY(SELECT t.name FROM exercise_tags et JOIN tags t ON t.id=et.tag_id JOIN tag_groups g ON g.id=t.group_id WHERE et.exercise_id=e.id AND t.archived_at IS NULL AND g.name=? ORDER BY t.id) AS load_types FROM exercises e', ('Тип нагрузки',))],workouts=workouts))
                 if method!='POST':return self.respond(404,{'error':'Не найдено'})
                 if self.path=='/api/profile-media' and role in ('coach','user','admin'):
                     target_uid = uid
@@ -236,6 +406,19 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(409, {'error':'Эта почта уже используется'})
                     c.execute('UPDATE users SET surname=?,given_name=?,patronymic=?,name=?,email=?,phone=? WHERE id=?',
                               (*parts, ' '.join(filter(None,parts)), email, phone, target_uid))
+                    if 'location_selection' in body:
+                        import hmac
+                        token = body['location_selection']
+                        payload = None
+                        if token:
+                            signature, _, payload = token.partition(':')
+                            expected = hmac.digest(LOCATION_KEY, payload.encode(), 'sha256').hex()
+                            if not hmac.compare_digest(expected, signature):
+                                raise ValueError('Выберите город из подсказок повторно')
+                        location = json.loads(payload) if payload else {}
+                        c.execute('UPDATE users SET profile_location=?::jsonb, location_country=?, location_city=?, '
+                                  'WHERE id=?',
+                                  (payload, location.get('code') or location.get('country'), location.get('city'), target_uid))
                     if role in ('coach', 'admin'):
                         save_coach_bio(c, target_uid, body)
                     c.commit()

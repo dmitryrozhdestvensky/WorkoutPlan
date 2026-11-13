@@ -76,7 +76,7 @@ function showExerciseEdit(exercise) {
 }
 
 function exerciseTagFields({groups, tags}, selected) {
-  const order = ['Тип нагрузки', 'Группа мышц', 'Зона тела', 'Оборудование',
+  const order = ['Тип нагрузки', 'Основные мышцы', 'Вторичные мышцы', 'Зона тела', 'Оборудование',
     'Движение', 'Сложность', 'Особенности'];
   return `<div class="exercise-tags-heading">
       <h2>Классификация упражнения</h2>

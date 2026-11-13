@@ -22,6 +22,8 @@ function openCoachBioEditor(button, key) {
   if (state.user.role === 'admin' && usesTable) {
     content.querySelector('#bio-back').remove();
     adminBreadcrumb('Тренеры', coachBioEditors[key]);
+  } else if (state.user.role === 'coach') {
+    adminBreadcrumb('Мой профиль', coachBioEditors[key]);
     const current = content.querySelector('.breadcrumb [aria-current="page"]');
     const profile = document.createElement('li');
     profile.className = 'breadcrumb-item';

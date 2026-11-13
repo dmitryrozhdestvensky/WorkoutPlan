@@ -28,6 +28,13 @@ function showClientCreate(client = null, isCoach = false) {
         const previousSelection = selected;
         selected = Number(link.dataset.clientWorkout);
         workout();
+        if (state.user.role === 'coach') {
+          $('#content > nav')?.remove();
+          adminBreadcrumb('Клиенты', link.textContent, ['Карточка клиента', () => {
+            selected = previousSelection;
+            showClientCreate(client);
+          }]);
+        }
         $('#back').textContent = 'Вернуться к карточке клиента';
         $('#back').onclick = () => {
           selected = previousSelection;
@@ -39,7 +46,10 @@ function showClientCreate(client = null, isCoach = false) {
   }
   $('#content').innerHTML = `${isCoach ? '' : '<button class="secondary" id="back-to-clients">Вернуться к клиентам</button>'}<h1>${isCoach?'Добавить тренера':'Добавить клиента'}</h1><form class="paper" id="client-create"><fieldset><legend>Личные данные</legend><div class="mb-3"><label for="client-surname" class="form-label">Фамилия</label><input id="client-surname" class="form-control" name="surname" autocomplete="family-name" required maxlength="50"></div><div class="mb-3"><label for="client-given_name" class="form-label">Имя</label><input id="client-given_name" class="form-control" name="given_name" autocomplete="given-name" required maxlength="50"></div><div class="mb-3"><label for="client-patronymic" class="form-label">Отчество</label><input id="client-patronymic" class="form-control" name="patronymic" autocomplete="additional-name" maxlength="50"></div><div class="mb-3"><label for="client-email" class="form-label">Почта</label><input id="client-email" class="form-control" name="email" type="email" autocomplete="email" maxlength="254" pattern="[^@ ]+@[^@ ]+[.][^@ ]+"></div><div class="mb-3"><label for="client-phone" class="form-label">Сотовый телефон</label><input id="client-phone" class="form-control" name="phone" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="32" required></div><button type="submit">Создать аккаунт</button></fieldset></form><div id="client-invite" role="status"></div>`;
   if (isCoach) adminBreadcrumb('Тренеры', 'Добавить тренера');
-  else $('#back-to-clients').onclick = manageClients;
+  else {
+    adminBreadcrumb('Клиенты', 'Добавить клиента');
+    $('#back-to-clients').onclick = () => manageClients();
+  }
   const phone = $('#client-create input[name=phone]');
   const telephone = window.intlTelInput?.(phone, {
     initialCountry:'ru', separateDialCode:true, strictMode:true,
