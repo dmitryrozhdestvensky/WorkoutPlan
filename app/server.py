@@ -177,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(503, {'error':'Подсказки городов временно недоступны'})
                 if self.path == '/api/state':
                     u.update(c.execute("""
-                        SELECT profile_location FROM users WHERE id=?
+                        SELECT profile_location, communication_languages FROM users WHERE id=?
                     """, (uid,)).fetchone())
                 if self.path=='/api/logout':
                     SESSIONS.pop(token.value,None);return self.respond(200,{'ok':True},'session=; Max-Age=0; Path=/')
@@ -191,7 +191,7 @@ class Handler(BaseHTTPRequestHandler):
                     c.commit()
                     return self.respond(200, {'ok':True})
                 if self.path=='/api/references':
-                    if role != 'admin':
+                    if role != 'admin' and not (role == 'coach' and method == 'GET'):
                         return self.respond(403, {'error':'Нет доступа'})
                     if method == 'GET':
                         return self.respond(200, {
@@ -273,6 +273,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(403, {'error':'Нет доступа'})
                     stats = dict(c.execute("""
                         SELECT count(*) AS total,
+                               count(*) FILTER (WHERE moderation_status = 'approved') AS approved,
+                               count(*) FILTER (WHERE moderation_status = 'pending') AS pending,
                                count(*) FILTER (WHERE EXISTS (
                                    SELECT 1 FROM jsonb_array_elements(gallery::jsonb) AS photo
                                    WHERE photo->>'type' = 'photo' AND COALESCE(photo->>'url', '') <> ''
@@ -354,7 +356,7 @@ class Handler(BaseHTTPRequestHandler):
                             workouts = [dict(row) for row in c.execute('SELECT * FROM workouts WHERE client=?', (uid,))]
                     for w in workouts:
                         w['details']=json.loads(w['details']); w['items']=json.loads(w['items']); r=c.execute('SELECT payload,updated FROM results WHERE workout=? AND client=?',(w['id'],w['client'])).fetchone();w['result']=json.loads(r['payload']) if r else {};w['updated']=r['updated'] if r else None
-                    return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT e.*, ARRAY(SELECT tag_id FROM exercise_tags WHERE exercise_id=e.id ORDER BY tag_id) AS tag_ids, ARRAY(SELECT t.name FROM exercise_tags et JOIN tags t ON t.id=et.tag_id WHERE et.exercise_id=e.id AND t.archived_at IS NULL ORDER BY t.group_id,t.id) AS tag_names, ARRAY(SELECT t.name FROM exercise_tags et JOIN tags t ON t.id=et.tag_id JOIN tag_groups g ON g.id=t.group_id WHERE et.exercise_id=e.id AND t.archived_at IS NULL AND g.name=? ORDER BY t.id) AS load_types FROM exercises e', ('Тип нагрузки',))],workouts=workouts))
+                    return self.respond(200,dict(user=dict(u),users=users,exercises=[dict(x) for x in c.execute('SELECT e.*, ARRAY(SELECT tag_id FROM exercise_tags WHERE exercise_id=e.id ORDER BY tag_id) AS tag_ids, ARRAY(SELECT t.name FROM exercise_tags et JOIN tags t ON t.id=et.tag_id WHERE et.exercise_id=e.id AND t.archived_at IS NULL ORDER BY t.group_id,t.id) AS tag_names, ARRAY(SELECT t.name FROM exercise_tags et JOIN tags t ON t.id=et.tag_id JOIN tag_groups g ON g.id=t.group_id WHERE et.exercise_id=e.id AND t.archived_at IS NULL AND g.name=? ORDER BY t.id) AS load_types, (SELECT u.name FROM users u WHERE u.id=e.created_by AND u.role=\'coach\') AS coach_name FROM exercises e WHERE e.moderation_status<>? OR e.created_by=? OR ?=?', ('Тип нагрузки','draft',uid,role,'admin'))],workouts=workouts))
                 if method!='POST':return self.respond(404,{'error':'Не найдено'})
                 if self.path=='/api/profile-media' and role in ('coach','user','admin'):
                     target_uid = uid
@@ -406,6 +408,14 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(409, {'error':'Эта почта уже используется'})
                     c.execute('UPDATE users SET surname=?,given_name=?,patronymic=?,name=?,email=?,phone=? WHERE id=?',
                               (*parts, ' '.join(filter(None,parts)), email, phone, target_uid))
+                    if 'communication_languages' in body:
+                        languages = body['communication_languages']
+                        if not isinstance(languages, list) or len(languages) > 9 or any(
+                            code not in ('ru', 'en', 'tt', 'uz', 'kk', 'pt', 'es', 'it', 'de') for code in languages
+                        ):
+                            raise ValueError('Выберите языки из списка')
+                        c.execute('UPDATE users SET communication_languages=?::text[] WHERE id=?',
+                                  (list(dict.fromkeys(languages)), target_uid))
                     if 'location_selection' in body:
                         import hmac
                         token = body['location_selection']
@@ -416,7 +426,7 @@ class Handler(BaseHTTPRequestHandler):
                             if not hmac.compare_digest(expected, signature):
                                 raise ValueError('Выберите город из подсказок повторно')
                         location = json.loads(payload) if payload else {}
-                        c.execute('UPDATE users SET profile_location=?::jsonb, location_country=?, location_city=?, '
+                        c.execute('UPDATE users SET profile_location=?::jsonb, location_country=?, location_city=? '
                                   'WHERE id=?',
                                   (payload, location.get('code') or location.get('country'), location.get('city'), target_uid))
                     if role in ('coach', 'admin'):
@@ -464,7 +474,7 @@ class Handler(BaseHTTPRequestHandler):
                     updated = c.execute("UPDATE users SET coach=? WHERE id=? AND role='user' AND is_del=0 AND coach IS NULL", (uid,body['id']))
                     if not updated.rowcount:
                         return self.respond(409, {'error':'Client unavailable'})
-                elif self.path=='/api/exercises' and role=='admin':
+                elif self.path=='/api/exercises' and role in ('admin','coach'):
                     name=body['name'].strip(); media=body.get('media','')
                     if not name or (media and not media.startswith('https://')):raise ValueError('Укажите название и HTTPS-ссылку на медиа')
                     gallery = body.get('gallery', [])
@@ -480,9 +490,12 @@ class Handler(BaseHTTPRequestHandler):
                         if media not in urls:
                             raise ValueError('Выберите главное фото из галереи')
                     if 'id' in body:
-                        exercise = c.execute('SELECT media FROM exercises WHERE id=?', (int(body['id']),)).fetchone()
+                        exercise_id = int(body['id'])
+                        exercise = c.execute('SELECT created_by, moderation_status FROM exercises WHERE id=? FOR UPDATE', (exercise_id,)).fetchone()
                         if not exercise:
                             return self.respond(404, {'error':'Упражнение не найдено'})
+                        if role == 'coach' and (exercise['created_by'] != uid or exercise['moderation_status'] != 'draft'):
+                            return self.respond(403, {'error':'Можно редактировать только свои черновики'})
                         if 'gallery' in body:
                             c.execute('UPDATE exercises SET name=?,instruction=?,media=?,gallery=? WHERE id=?',
                                       (name,body.get('instruction',''),media,json.dumps(gallery),int(body['id'])))
@@ -490,10 +503,10 @@ class Handler(BaseHTTPRequestHandler):
                             c.execute('UPDATE exercises SET name=?,instruction=? WHERE id=?',
                                       (name,body.get('instruction',''),int(body['id'])))
                     else:
-                        c.execute('INSERT INTO exercises(name,instruction,media,gallery) VALUES(?,?,?,?)',
-                                  (name,body.get('instruction',''),media,json.dumps(gallery)))
-                    if 'id' in body and 'tag_ids' in body:
-                        exercise_id = int(body['id'])
+                        exercise_id = c.execute(
+                            'INSERT INTO exercises(name,instruction,media,gallery,created_by,moderation_status) VALUES(?,?,?,?,?,?) RETURNING id',
+                            (name,body.get('instruction',''),media,json.dumps(gallery),uid,'draft' if role=='coach' else 'approved')).fetchone()['id']
+                    if 'tag_ids' in body:
                         tag_ids = body['tag_ids']
                         if not isinstance(tag_ids, list) or any(type(tag) is not int for tag in tag_ids):
                             raise ValueError('Проверьте выбранные теги')
@@ -505,6 +518,13 @@ class Handler(BaseHTTPRequestHandler):
                         for tag_id in sorted(existing):
                             c.execute('INSERT INTO exercise_tags(exercise_id, tag_id) VALUES(?,?)',
                                       (exercise_id, tag_id))
+                    if role == 'admin' and 'id' in body and 'moderation_status' in body:
+                        status = body['moderation_status']
+                        if status not in ('pending', 'approved', 'rejected'):
+                            raise ValueError('Выберите допустимый статус модерации')
+                        c.execute('UPDATE exercises SET moderation_status=? WHERE id=?', (status,exercise_id))
+                    if role == 'coach' and 'id' in body and body.get('submit_for_moderation') is True:
+                        c.execute("UPDATE exercises SET moderation_status='pending' WHERE id=?", (exercise_id,))
                     c.commit()
                 elif self.path=='/api/trainers' and role=='admin':
                     if len(body['password'])<8:raise ValueError('Пароль должен содержать не менее 8 символов')

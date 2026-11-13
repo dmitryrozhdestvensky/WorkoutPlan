@@ -21,7 +21,7 @@ function showClientCreate(client = null, isCoach = false) {
           </tr>`).join('') || '<tr><td colspan="4">Тренировки пока не назначены.</td></tr>'}</tbody>
         </table>
       </div>`;
-    adminBreadcrumb('Клиенты', 'Карточка клиента');
+    adminBreadcrumb('Клиенты', name || 'Карточка клиента');
     document.querySelectorAll('[data-client-workout]').forEach(link => {
       link.onclick = event => {
         event.preventDefault();

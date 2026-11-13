@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $root = "E:\GoogleDrive\WorkoutPlan\WebCollector"
 if (-not (Test-Path "$root\Data\fitness_trainers_master.xlsx")) { throw "Сначала распакуйте содержимое архива в E:\GoogleDrive\WorkoutPlan\WebCollector" }
 & py -3.13 --version

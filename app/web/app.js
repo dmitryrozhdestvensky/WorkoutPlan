@@ -35,26 +35,60 @@ function library() {
   const exercises = [...state.exercises].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   $('#content').innerHTML = `<div class="top">
     <h1>${admin ? 'Библиотека упражнений' : 'Упражнения'}</h1>
-    ${admin ? '<button id="add-exercise">Добавить упражнение</button>' : ''}
+    ${admin ? '<button id="add-exercise">Добавить упражнение</button>' : '<button id="add-exercise">Предложить упражнение</button>'}
     </div><p class="muted">Общие упражнения для программ всех тренеров.</p>
     <div id="exercise-stats" aria-live="polite"></div>
-    <div class="table-responsive table-card clients-table">
-      <table class="table align-top exercise-library-table" aria-label="Библиотека упражнений">
+    ${admin ? `
+      <section class="paper"><h2>На модерации</h2>
+        ${table(exercises.filter(exercise => exercise.moderation_status === 'pending'), 'На модерации', false, 'Нет упражнений, требующих модерации.')}
+      </section>
+      <section class="paper"><h2>Прошли модерацию</h2>
+        ${table(exercises.filter(exercise => exercise.moderation_status === 'approved'), 'Прошли модерацию')}
+      </section>` : `
+      <section class="paper"><h2>Мои упражнения</h2>
+        ${table(exercises.filter(exercise => exercise.created_by === state.user.id), 'Мои упражнения', true)}
+      </section>
+      <section class="paper"><h2>Библиотека упражнений</h2>
+        ${table(exercises.filter(exercise => exercise.created_by !== state.user.id), 'Библиотека упражнений')}
+      </section>`}`;
+  function table(items, label, showStatus = false, empty = 'Упражнения пока не добавлены.') {
+    return `<div class="table-responsive table-card clients-table">
+      <table class="table align-top exercise-library-table" aria-label="${esc(label)}">
         <thead><tr><th scope="col">Фото</th><th scope="col">Название</th></tr></thead>
-        <tbody>${exercises.map(exercise => `<tr ${admin ? `data-edit-exercise="${exercise.id}"` : ''}>
+        <tbody>${items.map(exercise => `<tr ${admin ? `data-edit-exercise="${exercise.id}"` : ''}>
           <td>${exerciseThumbnail(exercise)}</td>
           <td>${admin ? `<button type="button" class="exercise-edit-link">${esc(exercise.name)}</button>`
-            : `<strong>${esc(exercise.name)}</strong>`}${exerciseListDetails(exercise)}</td>
-        </tr>`).join('') || '<tr><td colspan="2">Упражнения пока не добавлены.</td></tr>'}</tbody>
+             : showStatus && ['draft', 'pending'].includes(exercise.moderation_status)
+              ? `<a href="#exercise-${exercise.id}" data-edit-own-exercise="${exercise.id}"><strong>${esc(exercise.name)}</strong></a>`
+              : `<strong>${esc(exercise.name)}</strong>`}${exerciseListDetails(exercise)}${showStatus ? exerciseModerationStatus(exercise) : ''}
+            ${admin && exercise.moderation_status === 'pending' && exercise.coach_name
+              ? `<p class="exercise-list-description">Тренер: <a href="/?coach=${exercise.created_by}">${esc(exercise.coach_name)}</a></p>`
+              : ''}</td>
+        </tr>`).join('') || `<tr><td colspan="2">${esc(empty)}</td></tr>`}</tbody>
       </table>
     </div>`;
+  }
   loadExerciseStats($('#exercise-stats'));
   adminBreadcrumb('Упражнения');
-  if (admin) $('#add-exercise').onclick = () => showExerciseCreate();
-  $('#content').querySelector('.exercise-library-table tbody').onclick = event => {
+  const add = $('#add-exercise');
+  add.onclick = () => run(async () => {
+    const references = await api('references');
+    if (add.isConnected) showExerciseCreate({}, {}, references);
+  });
+  $('#content').querySelectorAll('.exercise-library-table tbody').forEach(tbody => {
+    tbody.onclick = handleExerciseClick;
+  });
+  function handleExerciseClick(event) {
     const preview = event.target.closest('[data-exercise-photo]');
     if (preview) {
       showExercisePhoto(preview);
+      return;
+    }
+    const edit = event.target.closest('[data-edit-own-exercise]');
+    if (edit) {
+      event.preventDefault();
+      const exercise = exercises.find(item => item.id === Number(edit.dataset.editOwnExercise));
+      if (exercise) showExerciseEdit(exercise);
       return;
     }
     if (!admin || event.target.closest('a, .exercise-list-tags')) return;
@@ -72,12 +106,26 @@ async function loadExerciseStats(container) {
     const number = value => new Intl.NumberFormat('ru-RU').format(value);
     const loadTypes = stats.load_types.map(tag => `${esc(tag.name)} (${number(tag.total)})`).join(', ');
     container.innerHTML = `<p>Всего упражнений: ${number(stats.total)} (из них ${number(stats.with_photo)} с фото)${loadTypes ? ' · ' + loadTypes : ''}<br>
+      ${state.user.role === 'admin' ? `Упражнений — одобрено в системе: ${number(stats.approved)}<br>
+      Упражнений на модерации: ${number(stats.pending)}<br>` : ''}
       Добавлено за последний месяц: ${number(stats.recent)}<br>
       Использовано упражнений в тренировках тренеров: ${number(stats.used)}
       ${stats.unknown_dates ? '<br><small>Упражнения без даты добавления не входят в итог за месяц.</small>' : ''}</p>`;
   } catch {
     if (container.isConnected) container.textContent = 'Статистика пока недоступна.';
   }
+}
+
+function exerciseModerationStatus(exercise) {
+  const [label, theme] = ({
+    draft: ['Редактирование', 'info'],
+    pending: ['На модерации', 'warning'],
+    approved: ['Одобрено', 'success'],
+    rejected: ['Не прошло модерацию', 'danger']
+  })[exercise.moderation_status] || ['На модерации', 'warning'];
+  return `<div class="exercise-moderation"><span class="btn-subtle theme-${theme}">${label}</span>
+    ${exercise.moderation_status === 'draft' ? `<button type="button" class="btn-subtle theme-info"
+      data-edit-own-exercise="${exercise.id}">Редактировать</button>` : ''}</div>`;
 }
 
 function exerciseListDetails(exercise) {
@@ -479,14 +527,17 @@ function assignTemplate(w) {
 function editTemplateMedia(workout, profile = false, saveDraft = null, backToDraft = builder, galleryLabels = {}) {
   const gallery = [...(workout.details?.gallery || [])];
   let main = gallery.find(item => item.url === workout.details?.cover);
-  $('#content').innerHTML = `<button class="secondary" id="gallery-back">${galleryLabels.back || (profile?"Вернуться к профилю":saveDraft?"Вернуться к тренировке":"Вернуться к шаблону")}</button><h1>${galleryLabels.title || (profile?"Фото профиля":"Галерея тренировки")}</h1><p>${esc(workout.title)}</p><form id="gallery-upload"><div id="uploader"></div></form><ol id="gallery-order"></ol><button id="gallery-save">Сохранить галерею</button>`;
+  $('#content').innerHTML = `<button class="secondary" id="gallery-back">${galleryLabels.back || (profile?"Вернуться к профилю":saveDraft?"Вернуться к тренировке":"Вернуться к шаблону")}</button><h1>${galleryLabels.title || (profile?"Фото профиля":"Галерея тренировки")}</h1>${profile && state.user.role === 'coach' ? '' : `<p>${esc(workout.title)}</p>`}<form id="gallery-upload"><div id="uploader"></div></form><ol id="gallery-order"></ol><button id="gallery-save">Сохранить галерею</button>`;
   if (state.user.role === 'admin') {
     const section = saveDraft ? 'Упражнения' : 'Тренеры';
-    adminBreadcrumb(section, galleryLabels.title || 'Фото профиля');
+    adminBreadcrumb(section, galleryLabels.title || 'Фото профиля', profile && workout.coach != null ? [workout.title, () => adminCoachProfile(workout.coach)] : undefined);
   }
-  if (state.user.role === 'coach') adminBreadcrumb(profile ? 'Мой профиль' : 'Мои тренировки',
-    profile ? 'Фото профиля' : 'Галерея тренировки');
-  $('#gallery-back').onclick = saveDraft ? backToDraft : render;
+  if (state.user.role === 'coach' && saveDraft) adminBreadcrumb('Упражнения', galleryLabels.title);
+  else if (state.user.role === 'coach') adminBreadcrumb(profile ? 'Мой профиль' : 'Мои тренировки',
+    profile ? workout.title : 'Галерея тренировки');
+  const back = $('#gallery-back');
+  if (profile && !saveDraft && ['admin', 'coach'].includes(state.user.role)) back.remove();
+  else back.onclick = saveDraft ? backToDraft : render;
   function draw() {
     $('#gallery-order').innerHTML = gallery.map((item, position) => `<li class="entry-row"><div class="media-choice">${mediaPreview(item, position)}<label><input type="radio" name="main-media" value="${position}" ${item===main?'checked':''}> Главный файл</label></div><div class="actions"><button data-move="-1" data-position="${position}" ${position===0?'disabled':''}>Выше</button><button data-move="1" data-position="${position}" ${position===gallery.length-1?'disabled':''}>Ниже</button><button class="secondary" data-remove-media="${position}">Удалить</button></div></li>`).join('');
     document.querySelectorAll('[name=main-media]').forEach(input => input.onchange = () => { main = gallery[Number(input.value)]; });
@@ -634,13 +685,23 @@ function coachProfile() {
               ${type==='tel'?'inputmode="numeric"':''} ${required?'required':''}>
           </div>`).join('')}
         <div id="profile-geography"></div>
+        <fieldset class="mb-3"><legend>Язык общения</legend>
+          ${[['ru','Русский'], ['en','Английский'], ['tt','Татарский'],
+            ['uz','Узбекский'], ['kk','Казахский'], ['pt','Португальский'],
+            ['es','Испанский'], ['it','Итальянский'], ['de','Немецкий']].map(([code,name]) => `
+            <div class="form-field exercise-tag-option">
+              <input type="checkbox" class="check theme-success" id="profile-lang-${code}"
+                name="communication_languages" value="${code}" ${user.communication_languages?.includes(code) ? 'checked' : ''}>
+              <label for="profile-lang-${code}">${name}</label>
+            </div>`).join('')}
+        </fieldset>
         ${isCoach ? coachBioFields(user.coach_bio) : ''}<button type="submit">Сохранить профиль</button>
       </fieldset>
     </form>`;
   mountProfileGeography(user, $('#profile-geography'));
   const details = JSON.parse(user.profile_media || '{}');
   $('#content').insertAdjacentHTML('beforeend', '<section class="paper"><h2>Фото профиля</h2><div class="actions" id="profile-gallery"></div></section>');
-  renderGalleryPreview($('#profile-gallery'), details, () => editTemplateMedia({title:user.name,details}, true));
+  renderGalleryPreview($('#profile-gallery'), details, () => editTemplateMedia({title:user.name,details}, true), isCoach ? 3 : undefined);
   if (isCoach) {
     adminBreadcrumb('Мой профиль');
     renderCoachSocialAccounts();
@@ -653,7 +714,8 @@ function coachProfile() {
   });
   $('#profile-form').onsubmit = event => {
     event.preventDefault();
-    const fields = Object.fromEntries(new FormData(event.currentTarget));
+    const data = new FormData(event.currentTarget);
+    const fields = {...Object.fromEntries(data), communication_languages:data.getAll('communication_languages')};
     run(async () => {
       if (telephone && fields.phone.trim()) {
         await telephone.promise;
@@ -667,9 +729,11 @@ function coachProfile() {
   };
 }
 
-function renderGalleryPreview(container, details, onManage) {
+function renderGalleryPreview(container, details, onManage, maxPreviews) {
   const items = orderedGallery(details);
-  const visible = items.length > 5 ? items.slice(0, 4) : items;
+  const visible = maxPreviews === undefined
+    ? (items.length > 5 ? items.slice(0, 4) : items)
+    : items.slice(0, maxPreviews);
   container.innerHTML = visible.map(mediaPreview).join('');
   const button = document.createElement('button');
   button.type = 'button';
@@ -716,7 +780,7 @@ function adminCoachProfile(id) {
     <section class="paper"><h2>Фото профиля</h2><div class="actions" id="coach-photos"></div></section>`;
   adminBreadcrumb('Тренеры', 'Профиль тренера');
   const details = JSON.parse(coach.profile_media || '{}');
-  renderGalleryPreview($('#coach-photos'),details,()=>editTemplateMedia({coach:id,title:coach.name,details},true));
+  renderGalleryPreview($('#coach-photos'),details,()=>editTemplateMedia({coach:id,title:coach.name,details},true),3);
   renderCoachSocialAccounts();
   renderCoachBioLists(coach.coach_bio);
   renderCoachDelete(coach);

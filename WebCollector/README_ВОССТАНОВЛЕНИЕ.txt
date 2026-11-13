@@ -1,4 +1,4 @@
-ВОССТАНОВЛЕНИЕ WebCollector НА РАБОЧЕМ НОУТБУКЕ
+﻿ВОССТАНОВЛЕНИЕ WebCollector НА РАБОЧЕМ НОУТБУКЕ
 =================================================
 1. Распакуйте содержимое ЭТОГО архива непосредственно в C:\WebCollector.
    Должно быть C:\WebCollector\Data\fitness_trainers_master.xlsx и C:\WebCollector\TenChat\collect_tenchat_v7.py.

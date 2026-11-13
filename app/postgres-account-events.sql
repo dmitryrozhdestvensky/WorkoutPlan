@@ -89,3 +89,22 @@ ALTER TABLE users DROP COLUMN IF EXISTS city_id, DROP COLUMN IF EXISTS country_c
 DROP TABLE IF EXISTS geo_cities;
 DROP TABLE IF EXISTS geo_countries;
 CREATE INDEX IF NOT EXISTS users_location_country_city_idx ON users(location_country,location_city);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS communication_languages TEXT[] NOT NULL DEFAULT '{}';
+
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id);
+UPDATE exercises SET created_by = (
+    SELECT id FROM users WHERE role='admin' AND is_del=0 ORDER BY id LIMIT 1
+) WHERE created_by IS NULL;
+
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS moderation_status TEXT
+    CHECK (moderation_status IN ('pending', 'approved', 'rejected'));
+UPDATE exercises e SET moderation_status = CASE WHEN EXISTS (
+    SELECT 1 FROM users u WHERE u.id=e.created_by AND u.role='coach'
+) THEN 'pending' ELSE 'approved' END WHERE moderation_status IS NULL;
+ALTER TABLE exercises ALTER COLUMN moderation_status SET DEFAULT 'approved',
+    ALTER COLUMN moderation_status SET NOT NULL;
+
+ALTER TABLE exercises DROP CONSTRAINT IF EXISTS exercises_moderation_status_check;
+ALTER TABLE exercises ADD CONSTRAINT exercises_moderation_status_check
+    CHECK (moderation_status IN ('draft', 'pending', 'approved', 'rejected'));

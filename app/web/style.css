@@ -287,3 +287,29 @@
   #workout-print .workout-print-repeat { border: 0; padding: 0 0 100px; }
   #workout-print .workout-print-coach img { width: 64px; height: 64px; object-fit: cover; }
 }
+
+.exercise-moderation { margin-top: .5rem; }
+.exercise-moderation .btn-subtle {
+  display: inline-block;
+  padding: .25rem .5rem;
+  border-radius: .375rem;
+  font-size: .875rem;
+  font-weight: 600;
+}
+.exercise-moderation .theme-warning { color: #664d03; background: #fff3cd; }
+.exercise-moderation .theme-success { color: #0a3622; background: #d1e7dd; }
+.exercise-moderation .theme-danger { color: #58151c; background: #f8d7da; }
+
+.exercise-moderation .theme-info { color: #055160; background: #cff4fc; margin-inline-start: .5rem; }
+
+.exercise-moderation-options { margin-top: 1rem; border: 0; padding: 0; }
+.exercise-moderation-options .radio {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.exercise-moderation-options .theme-warning { accent-color: #b77900; }
+.exercise-moderation-options .theme-success { accent-color: #00894a; }
+.exercise-moderation-options .theme-danger { accent-color: #c5283d; }
