@@ -20,6 +20,19 @@ def connect():
     return postgres_backend.connect(DATABASE_URL)
 
 
+PROMO_CODE_PATTERN = re.compile(r'[DFGJNQRSUVWZ23456789]{5}', re.ASCII | re.IGNORECASE)
+
+
+def normalize_promo_code(value, optional=False):
+    if isinstance(value, str):
+        value = value.strip()
+        if optional and not value:
+            return ''
+        if PROMO_CODE_PATTERN.fullmatch(value):
+            return value.upper()
+    raise ValueError('Введите промокод из пяти допустимых символов')
+
+
 def password(value, salt):
     return hashlib.pbkdf2_hmac('sha256', value.encode(), salt.encode(), 200000).hex()
 def save_coach_bio(db, user_id, body):
@@ -203,13 +216,71 @@ class Handler(BaseHTTPRequestHandler):
                                  'email_confirm', 'users', 'Почта подтверждена по одноразовой ссылке')
                     c.commit()
                     return self.respond(200, {'ok':True})
+                if self.path == '/api/register' and method == 'POST':
+                    role = body.get('role')
+                    if role not in ('user', 'coach'):
+                        raise ValueError('Выберите роль клиента или тренера')
+                    values = [body.get(key, '') for key in ('email','surname','given_name','phone','password')]
+                    if not all(isinstance(value, str) and chr(0) not in value for value in values):
+                        raise ValueError('Проверьте поля регистрации')
+                    email, surname, given, phone = (value.strip() for value in values[:4])
+                    email = email.lower()
+                    secret = values[4]
+                    code = normalize_promo_code(body.get('code', ''), optional=True)
+                    if not surname or not given or max(len(surname), len(given)) > 50:
+                        raise ValueError('Укажите имя и фамилию')
+                    if len(email) > 254 or email.endswith('@login.invalid') or not re.fullmatch(r'[^@\s]+@[^@\s]+[.][^@\s]+', email):
+                        raise ValueError('Введите корректный email')
+                    if phone and not re.fullmatch(r'[+][1-9][0-9]{6,14}', phone):
+                        raise ValueError('Введите телефон в международном формате')
+                    if not isinstance(secret, str) or not 8 <= len(secret) <= 128:
+                        raise ValueError('Введите пароль от 8 до 128 символов')
+                    if body.get('password_confirmation') != secret:
+                        raise ValueError('Пароли не совпадают')
+                    salt = secrets.token_hex(16)
+                    digest = password(secret, salt)
+                    if c.execute('SELECT 1 FROM users WHERE lower(email)=?', (email,)).fetchone():
+                        return self.respond(409, {'error':'Этот email уже зарегистрирован'})
+                    promo = None
+                    if code:
+                        promo = c.execute("""
+                            SELECT p.id,p.owner_id,u.role FROM promo_codes p JOIN users u ON u.id=p.owner_id
+                            WHERE p.code=? AND p.deleted_at IS NULL AND u.is_del=0
+                            FOR SHARE OF p,u
+                        """, (code,)).fetchone()
+                        if not promo:
+                            raise ValueError('Промокод не найден или больше не действует')
+                    coach = promo['owner_id'] if promo and promo['role'] == 'coach' and role == 'user' else None
+                    new_id = c.execute("""
+                        INSERT INTO users(name,email,role,salt,hash,coach,surname,given_name,phone)
+                        VALUES(?,?,?,?,?,?,?,?,?) RETURNING id
+                    """, (f'{surname} {given}',email,role,salt,digest,coach,surname,given,phone)).fetchone()['id']
+                    audit_action(c, new_id, role, 'Регистрация', 'Учётная запись', 'insert', 'users',
+                                 f'Создан аккаунт ID {new_id}')
+                    if promo:
+                        c.execute('INSERT INTO promo_redemptions(user_id,promo_code_id) VALUES(?,?)', (new_id,promo['id']))
+                        audit_action(c, new_id, role, 'Регистрация', 'Промокод', 'insert', 'promo_redemptions',
+                                     f"Активирован промокод ID {promo['id']}")
+                        c.execute("SELECT set_config('workoutplan.actor_id', ?, true), "
+                                  "set_config('workoutplan.actor_role', ?, true)", (str(new_id),role))
+                        c.execute('INSERT INTO star_awards(user_id,reason,amount) VALUES(?,?,5),(?,?,10)',
+                                  (new_id,'promo_registration',promo['owner_id'],f'promo_invite_{new_id}'))
+                    c.commit()
+                    return self.respond(201, {'ok':True})
+                if self.path == '/api/referral-check' and method == 'POST':
+                    code = normalize_promo_code(body.get('code'))
+                    active = c.execute("""
+                        SELECT 1 FROM promo_codes p JOIN users u ON u.id=p.owner_id
+                        WHERE p.code=? AND p.deleted_at IS NULL AND u.is_del=0
+                    """, (code,)).fetchone()
+                    return self.respond(200, {'valid': bool(active)})
                 if not uid:return self.respond(401,{'error':'Войдите в аккаунт'})
                 u=c.execute('SELECT id,name,email,role,coach,surname,given_name,patronymic,phone,profile_media,coach_bio FROM users WHERE id=? AND is_del=0',(uid,)).fetchone()
                 if not u: return self.respond(401, {'error':'Войдите в аккаунт'})
                 role=u['role']
-                if role == 'user':
+                if role in ('user', 'coach'):
                     c.execute('UPDATE users SET last_activity_at=clock_timestamp() WHERE id=?', (uid,))
-                if self.path == '/api/activity' and method == 'POST' and role == 'user':
+                if self.path == '/api/activity' and method == 'POST' and role in ('user', 'coach'):
                     c.commit()
                     return self.respond(200, {'ok':True})
                 if method == 'POST':
@@ -243,6 +314,62 @@ class Handler(BaseHTTPRequestHandler):
                     c.commit()
                     return self.respond(200, {'ok':True})
 
+                if self.path == '/api/star-history' and method == 'GET':
+                    if role not in ('user', 'coach'):
+                        return self.respond(403, {'error':'Нет доступа'})
+                    rows = c.execute("""
+                        SELECT id, reason, amount, awarded_at::text AS awarded_at
+                        FROM star_awards WHERE user_id=? ORDER BY awarded_at DESC, id DESC
+                    """, (uid,))
+                    return self.respond(200, [dict(row) for row in rows])
+
+                if self.path == '/api/body-measurements':
+                    if role != 'user':
+                        return self.respond(403, {'error':'Нет доступа'})
+                    if method == 'GET':
+                        rows = c.execute("""
+                            SELECT id, measured_on::text AS measured_on, measurements
+                            FROM body_measurements WHERE client_id=? ORDER BY measured_on DESC
+                        """, (uid,))
+                        return self.respond(200, [dict(row) for row in rows])
+                    from datetime import datetime
+                    from datetime import timezone, timedelta
+                    today = datetime.now(timezone(timedelta(hours=3))).date()
+                    raw_date = body.get('measured_on')
+                    if not isinstance(raw_date, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', raw_date):
+                        raise ValueError('Укажите дату замера')
+                    measured_on = date.fromisoformat(raw_date)
+                    if measured_on > today:
+                        raise ValueError('Дата замера не может быть в будущем')
+                    values = body.get('measurements')
+                    allowed = {'neck','chest','waist','abdomen','hips','shoulders','underbust'}
+                    allowed.update(f'{part}_{side}' for part in ('arm','thigh','calf','forearm','wrist','knee','ankle') for side in ('left','right'))
+                    if not isinstance(values, dict) or not values or values.keys() - allowed or any(
+                        type(value) not in (int, float) or not 0 < value <= 500 or round(value, 1) != value
+                        for value in values.values()
+                    ):
+                        raise ValueError('Введите хотя бы один обхват от 0,1 до 500 см, с точностью до 0,1 см')
+                    entry = body.get('id')
+                    if entry is None:
+                        if not c.execute("""
+                            INSERT INTO body_measurements(client_id,measured_on,measurements)
+                            VALUES(?,?,?::jsonb) ON CONFLICT(client_id,measured_on) DO NOTHING RETURNING id
+                        """, (uid, measured_on, json.dumps(values))).fetchone():
+                            return self.respond(409, {'error':'За эту дату уже есть замеры. Откройте их для редактирования.'})
+                    else:
+                        if type(entry) is not int or not 1 <= entry <= 2147483647:
+                            raise ValueError('Неверный номер записи')
+                        previous = c.execute("""
+                            SELECT measured_on FROM body_measurements WHERE id=? AND client_id=? FOR UPDATE
+                        """, (entry, uid)).fetchone()
+                        if not previous:
+                            return self.respond(404, {'error':'Замеры не найдены'})
+                        if previous['measured_on'] != measured_on:
+                            raise ValueError('Дата сохранённой записи не меняется')
+                        c.execute('UPDATE body_measurements SET measurements=?::jsonb WHERE id=? AND client_id=?',
+                                  (json.dumps(values), entry, uid))
+                    c.commit()
+                    return self.respond(200, {'ok':True})
                 if method == 'GET' and self.path == '/api/geography':
                     query = self.query.get('q', [''])[0].strip()[:100]
                     try:
@@ -253,6 +380,8 @@ class Handler(BaseHTTPRequestHandler):
                     u.update(c.execute("""
                         SELECT profile_location, communication_languages, email_verified_at IS NOT NULL AS email_verified,
                                birth_date::text AS birth_date,
+                               workoutplan_profile_points(users) AS profile_completion,
+                               (SELECT coalesce(sum(amount), 0) FROM star_awards WHERE user_id=users.id) AS star_balance,
                                CASE WHEN last_activity_at >= CURRENT_TIMESTAMP - INTERVAL '10 minutes' THEN 'online'
                                     WHEN last_activity_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes' THEN 'recent'
                                END AS activity
@@ -401,6 +530,38 @@ class Handler(BaseHTTPRequestHandler):
                         ORDER BY t.id
                     """, ('Тип нагрузки',))]
                     return self.respond(200, stats)
+                if self.path == '/api/promo-codes':
+                    if role != 'coach':
+                        return self.respond(403, {'error':'Нет доступа'})
+                    if method == 'GET':
+                        return self.respond(200, [dict(row) for row in c.execute("""
+                            SELECT id,code,comment FROM promo_codes
+                            WHERE owner_id=? AND deleted_at IS NULL ORDER BY id DESC
+                        """, (uid,))])
+                    if body.get('action') == 'delete':
+                        deleted = c.execute("""
+                            UPDATE promo_codes SET deleted_at=CURRENT_TIMESTAMP
+                            WHERE id=? AND owner_id=? AND deleted_at IS NULL RETURNING code
+                        """, (int(body['id']),uid)).fetchone()
+                        if not deleted:
+                            return self.respond(404, {'error':'Промокод не найден'})
+                    elif body.get('action') == 'create':
+                        comment = body.get('comment', '')
+                        if not isinstance(comment, str) or len(comment) > 250:
+                            raise ValueError('Комментарий должен содержать не более 250 символов')
+                        for _ in range(20):
+                            code = ''.join(secrets.choice('DFGJNQRSUVWZ23456789') for _ in range(5))
+                            if c.execute("""
+                                INSERT INTO promo_codes(owner_id, code, comment) VALUES(?,?,?)
+                                ON CONFLICT (code) DO NOTHING RETURNING id
+                            """, (uid,code,comment.strip())).fetchone():
+                                break
+                        else:
+                            return self.respond(503, {'error':'Не удалось создать код. Попробуйте ещё раз'})
+                    else:
+                        raise ValueError('Неизвестное действие')
+                    c.commit()
+                    return self.respond(200, {'ok':True})
                 if self.path == '/api/coach-programs':
                     if role != 'coach':
                         return self.respond(403, {'error':'Нет доступа'})
@@ -715,7 +876,23 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path=='/api/results' and role=='user':
                     w=c.execute('SELECT * FROM workouts WHERE id=? AND client=?',(body['workout'],uid)).fetchone()
                     if not w:raise ValueError('Тренировка недоступна')
-                    c.execute('INSERT INTO results(workout,client,payload) VALUES(?,?,?) ON CONFLICT(workout,client) DO UPDATE SET payload=excluded.payload,updated=CURRENT_TIMESTAMP',(w['id'],uid,json.dumps(body['result'])))
+                    result = body['result']
+                    items = json.loads(w['items'])
+                    if not isinstance(result, dict) or any(key not in {str(i) for i in range(len(items))} for key in result):
+                        raise ValueError('Неверные результаты тренировки')
+                    for value in result.values():
+                        if not isinstance(value, dict) or type(value.get('done', False)) is not bool:
+                            raise ValueError('Неверный статус упражнения')
+                    c.execute('INSERT INTO results(workout,client,payload) VALUES(?,?,?) ON CONFLICT(workout,client) DO UPDATE SET payload=excluded.payload,updated=CURRENT_TIMESTAMP',(w['id'],uid,json.dumps(result)))
+                    awarded = 0
+                    if items and all(result.get(str(i), {}).get('done') is True for i in range(len(items))):
+                        award = c.execute("""
+                            INSERT INTO star_awards(user_id,reason,amount) VALUES(?,?,5)
+                            ON CONFLICT(user_id,reason) DO NOTHING RETURNING amount
+                        """, (uid, 'workout_completed_' + str(w['id']))).fetchone()
+                        awarded = award['amount'] if award else 0
+                    c.commit()
+                    return self.respond(200, {'ok':True, 'awarded_stars':awarded})
                 else:return self.respond(403,{'error':'Нет доступа к этому действию'})
                 return self.respond(200,{'ok':True})
         except (ValueError,KeyError,TypeError) + INTEGRITY_ERRORS as e:self.respond(400,{'error':str(e) if not isinstance(e,INTEGRITY_ERRORS) else 'Такая почта уже зарегистрирована'})

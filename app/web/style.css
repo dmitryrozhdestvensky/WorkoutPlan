@@ -390,3 +390,45 @@
   margin-top: .25rem;
   background: #fff;
 }
+
+.clients-table .promo-codes-table > tbody > tr > * { vertical-align: middle; }
+.promo-codes-table .actions { margin-top: 0; }
+
+button.action-with-icon { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; }
+.action-with-icon svg { flex: none; }
+button.action-with-icon.theme-danger { background: #b42335; color: #fff; }
+button.action-with-icon.theme-danger:hover:not(:disabled) { background: #931a2a; }
+
+.registration-promo-tooltip:not([hidden]) { position: relative; display: table; margin-top: .5rem; }
+.registration-promo-tooltip .tooltip-inner {
+  display: block; padding: .35rem .65rem; border-radius: .375rem;
+  background: var(--promo-tooltip-color, #172f25); color: #fff; font-size: .875rem;
+}
+.registration-promo-tooltip .tooltip-arrow {
+  position: absolute; top: -.35rem; left: .85rem;
+  border-inline: .35rem solid transparent; border-bottom: .35rem solid var(--promo-tooltip-color, #172f25);
+}
+
+.registration-promo-tooltip.theme-danger { --promo-tooltip-color: #b42335; }
+.registration-promo-tooltip.theme-success { --promo-tooltip-color: #22683c; }
+
+.registration-strength { margin-top: .5rem; }
+.registration-strength .strength-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: .25rem; }
+.registration-strength .strength-segment { height: 6px; border-radius: 99px; background: #e4e8e3; }
+.registration-strength[data-level="1"] .strength-segment:first-child { background: #b42335; }
+.registration-strength[data-level="2"] .strength-segment:nth-child(-n+2) { background: #b88200; }
+.registration-strength[data-level="3"] .strength-segment:nth-child(-n+3) { background: #0d6efd; }
+.registration-strength[data-level="4"] .strength-segment { background: #238636; }
+
+.client-home-card h2 { margin: 0 0 100px; }
+
+/* Measurement bonus: native dialog with Bootstrap dialog structure. */
+.measurement-reward-dialog { width:min(480px, calc(100% - 32px)); max-height:calc(100dvh - 32px); box-sizing:border-box; border:1px solid #d6ded5; border-radius:16px; padding:0; color:inherit; background:#fff; box-shadow:0 20px 64px #132f2440; }
+.measurement-reward-dialog::backdrop { background:rgb(15 30 24 / 50%); }
+.measurement-reward-dialog .dialog-header { padding:24px 24px 0; }
+.measurement-reward-dialog .dialog-title { margin:0; }
+.measurement-reward-dialog .dialog-body { padding:20px 24px; }
+.measurement-reward-dialog .dialog-body p { margin:16px 0 0; }
+.measurement-reward-stars { display:flex; gap:10px; color:#c89418; font-size:32px; }
+.measurement-reward-dialog .dialog-footer { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:12px; padding:20px 24px; border-top:1px solid #e5e7e5; }
+.measurement-reward-dialog .dialog-footer button { margin:0; }

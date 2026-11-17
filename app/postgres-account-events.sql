@@ -146,6 +146,17 @@ CREATE INDEX IF NOT EXISTS audit_events_time_idx ON audit_events(occurred_at DES
 CREATE INDEX IF NOT EXISTS audit_events_role_time_idx ON audit_events(actor_role, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS audit_events_module_time_idx ON audit_events(module, subsection, occurred_at DESC);
 
+CREATE TABLE IF NOT EXISTS promo_codes (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    owner_id INTEGER NOT NULL REFERENCES users(id),
+    code TEXT NOT NULL UNIQUE CHECK (code ~ '^[DFGJNQRSUVWZ23456789]{5}$'),
+    comment TEXT NOT NULL DEFAULT '' CHECK (char_length(comment) <= 250),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+ALTER TABLE promo_codes DROP COLUMN IF EXISTS invite_role;
+CREATE INDEX IF NOT EXISTS promo_codes_owner_idx ON promo_codes(owner_id,id DESC) WHERE deleted_at IS NULL;
+
 CREATE OR REPLACE FUNCTION workoutplan_audit_change() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -211,6 +222,12 @@ BEGIN
     END LOOP;
     IF TG_OP = 'UPDATE' AND change_text = '' THEN RETURN NULL; END IF;
 
+    IF TG_TABLE_NAME = 'promo_codes' AND TG_OP = 'UPDATE'
+        AND previous->>'deleted_at' IS NULL AND current_row->>'deleted_at' IS NOT NULL THEN
+        event_action := 'delete';
+        change_text := 'Удаление записи';
+    END IF;
+
     IF TG_TABLE_NAME = 'tags' AND TG_OP = 'UPDATE'
         AND previous->>'archived_at' IS NULL AND current_row->>'archived_at' IS NOT NULL THEN
         event_action := 'delete';
@@ -237,6 +254,7 @@ BEGIN
         ('workouts', 'Тренировки', 'title,client,coach,items,details'),
         ('results', 'Результаты тренировок', 'payload'),
         ('coach_programs', 'Мои программы', 'title,duration,items'),
+        ('promo_codes', 'Промокоды', 'comment,deleted_at'),
         ('tags', 'Справочники', 'name,archived_at')
     ) AS settings(table_name, module, fields)
     LOOP
@@ -255,3 +273,101 @@ WHERE entity = 'tags' AND action = 'update'
     AND starts_with(description, 'Поле «archived_at»: — → ');
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS star_awards (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    reason TEXT NOT NULL,
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    awarded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, reason)
+);
+
+CREATE OR REPLACE FUNCTION workoutplan_profile_points(account users) RETURNS INTEGER
+LANGUAGE sql STABLE AS $$
+    SELECT
+        5 * (btrim(coalesce(account.surname, '')) <> '')::int +
+        5 * (btrim(coalesce(account.given_name, '')) <> '')::int +
+        5 * (btrim(coalesce(account.patronymic, '')) <> '')::int +
+        10 * (account.birth_date IS NOT NULL)::int +
+        10 * (coalesce(account.location_country, '') <> '' AND coalesce(account.location_city, '') <> '')::int +
+        10 * (cardinality(account.communication_languages) > 0)::int +
+        5 * (btrim(coalesce(account.phone, '')) <> '')::int +
+        CASE WHEN btrim(coalesce(account.email, '')) <> '' AND lower(account.email) NOT LIKE '%@login.invalid'
+             THEN 5 + 10 * (account.email_verified_at IS NOT NULL)::int ELSE 0 END +
+        5 * least(2, (SELECT count(DISTINCT photo->>'url') FROM
+            jsonb_array_elements(coalesce(nullif(account.profile_media, ''), '{}')::jsonb->'gallery') photo
+            WHERE photo->>'type' = 'photo' AND coalesce(photo->>'url', '') <> ''))::int;
+$$;
+
+CREATE OR REPLACE FUNCTION workoutplan_award_profile_stars() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.role NOT IN ('user', 'coach') OR NEW.is_del <> 0 THEN RETURN NEW; END IF;
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO star_awards(user_id, reason, amount) VALUES(NEW.id, 'registration', 10)
+        ON CONFLICT (user_id, reason) DO NOTHING;
+    END IF;
+    INSERT INTO star_awards(user_id, reason, amount)
+    SELECT NEW.id, 'profile_' || threshold, amount
+    FROM (VALUES (25,5), (50,10), (75,15), (100,20)) milestone(threshold, amount)
+    WHERE threshold <= workoutplan_profile_points(NEW)
+    ON CONFLICT (user_id, reason) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS workoutplan_award_profile_stars ON users;
+CREATE TRIGGER workoutplan_award_profile_stars
+AFTER INSERT OR UPDATE OF surname,given_name,patronymic,birth_date,location_country,location_city,
+    communication_languages,phone,email,email_verified_at,profile_media ON users
+FOR EACH ROW EXECUTE FUNCTION workoutplan_award_profile_stars();
+
+CREATE OR REPLACE FUNCTION workoutplan_audit_star_award() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    actor TEXT := nullif(current_setting('workoutplan.actor_id', true), '');
+BEGIN
+    INSERT INTO audit_events(actor_id,actor_role,module,subsection,action,entity,entity_id,description)
+    SELECT coalesce(actor::integer, u.id),
+        CASE WHEN actor IS NULL THEN u.role ELSE current_setting('workoutplan.actor_role', true) END,
+        'Звёзды', 'Начисления', 'star_award', 'star_awards', NEW.id::text,
+        format('Начислено звёзд: %s. Получатель: ID %s. Основание: %s',
+               NEW.amount, NEW.user_id, NEW.reason)
+    FROM users u WHERE u.id=NEW.user_id;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS workoutplan_audit_star_award ON star_awards;
+CREATE TRIGGER workoutplan_audit_star_award AFTER INSERT ON star_awards
+FOR EACH ROW EXECUTE FUNCTION workoutplan_audit_star_award();
+
+CREATE TABLE IF NOT EXISTS promo_redemptions (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    promo_code_id INTEGER NOT NULL REFERENCES promo_codes(id),
+    redeemed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS body_measurements (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    client_id INTEGER NOT NULL REFERENCES users(id),
+    measured_on DATE NOT NULL,
+    measurements JSONB NOT NULL,
+    UNIQUE(client_id, measured_on)
+);
+DROP TRIGGER IF EXISTS workoutplan_audit ON body_measurements;
+CREATE TRIGGER workoutplan_audit AFTER INSERT OR UPDATE ON body_measurements
+FOR EACH ROW EXECUTE FUNCTION workoutplan_audit_change('Замеры тела', 'measured_on,measurements');
+
+CREATE OR REPLACE FUNCTION workoutplan_award_measurement_stars() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO star_awards(user_id, reason, amount)
+    VALUES(NEW.client_id, 'body_measurement_' || NEW.id, 5)
+    ON CONFLICT(user_id, reason) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS workoutplan_award_measurement_stars ON body_measurements;
+CREATE TRIGGER workoutplan_award_measurement_stars AFTER INSERT ON body_measurements
+FOR EACH ROW EXECUTE FUNCTION workoutplan_award_measurement_stars();

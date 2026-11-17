@@ -47,7 +47,7 @@ function openCoachBioEditor(button, key) {
         <td><div class="reference-actions">
           <button type="button" class="secondary" data-move="-1" aria-label="Выше, запись ${index + 1}" ${index === 0 ? 'disabled' : ''}>↑</button>
           <button type="button" class="secondary" data-move="1" aria-label="Ниже, запись ${index + 1}" ${index === entries.length - 1 ? 'disabled' : ''}>↓</button>
-          <button type="button" class="secondary" data-remove>Удалить</button>
+          <button type="button" class="theme-danger action-with-icon" data-remove>${actionIcon("delete")}Удалить</button>
         </div></td></tr>`).join('')
         || '<tr><td colspan="3">Записей пока нет.</td></tr>';
       rows.querySelectorAll('input').forEach((input, index) => {

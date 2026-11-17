@@ -10,8 +10,130 @@ function styleFormFields() {
 }
 const formObserver = new MutationObserver(styleFormFields);
 formObserver.observe(document.querySelector("#app"), {childList:true, subtree:true});
-function login(){state=null;$('#app').innerHTML=`<div class="container px-4"><div class="row justify-content-center"><main class="login col-12 col-sm-10 col-md-8 col-lg-6"><h1>ПланТренировок</h1><p class="muted">Ваш план. Ваш темп. Ваш прогресс.</p><h2>Войти в аккаунт</h2><form id="login" class="row gy-2"><div class="col-12"><label for="email">Электронная почта</label><input id="email" type="email" required autocomplete="username"></div><div class="col-12"><label for="password">Пароль</label><input id="password" type="password" required autocomplete="current-password"></div><div class="col-12"><button type="submit">Войти</button></div><p id="loginError" class="error col-12" role="alert"></p></form><div class="demo"><p><b>Локальная демонстрация</b><br><small>Выберите роль и введите пароль из файла data/demo-password.txt.</small></p>${[['user','Пользователь'],['coach','Тренер'],['admin','Администратор']].map(([r,n])=>`<button class="secondary" data-demo="${r}">${n}</button>`).join('')}</div></main></div></div>`;document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>{$('#email').value=b.dataset.demo+'@demo.local';$('#password').focus()});$('#login').onsubmit=async e=>{e.preventDefault();try{await api('login',{email:$('#email').value,password:$('#password').value});page='home';selected=null;await load()}catch(err){$('#loginError').textContent=err.message}}}
-function render(){const u=state.user,role=u.role;const coachId=new URLSearchParams(location.search).get('coach');const roleLinks=role==='admin'?[['trainers','Тренеры'],['admin-clients','Клиенты'],['library','Упражнения'],['references','Справочники'],['audit','Протокол']]:role==='coach'?[['profile','Мой профиль'],['templates','Мои тренировки'],['programs','Мои программы'],['workouts','Отчеты клиентов'],['clients','Клиенты'],['library','Упражнения']]:[['workouts','Мой план'],['history','История занятий'],['profile','Мой профиль']];const links=role!=='user'?roleLinks:[['home','Главная'],...roleLinks];if(page!=='home'&&!(role==='coach'&&page==='builder')&&!links.some(x=>x[0]===page))page=links[0][0];$('#app').innerHTML=`<div class="container-fluid px-0"><div class="row g-0 min-vh-100"><aside class="col-12 col-md-4 col-lg-3 col-xl-2 px-4"><strong>${role!=='user'?'<a href="/" style="color:inherit">ПланТренировок</a>':'ПланТренировок'}</strong><small>Пространство для движения</small><nav>${links.map(([id,n])=>`<button data-nav="${id}" class="${(page===id || (page==='builder' && id==='templates'))?'active':''}">${n}</button>`).join('')}</nav><div class="account"><div>${esc(u.name)}<br><small>${{user:'Пользователь',coach:'Тренер',admin:'Администратор'}[role]}</small></div><button id="logout" class="secondary">Выйти</button></div></aside><main id="content" class="col-12 col-md-8 col-lg-9 col-xl-10 px-4"></main></div></div>`;document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{if(location.search)history.replaceState(null,'','/');page=b.dataset.nav;selected=null;render()});$('#logout').onclick=()=>run(async()=>{await api('logout',{});login()});const clientId = new URLSearchParams(location.search).get('client');
+function referralCode(search = location.search) {
+  return (new URLSearchParams(search).get('ref') ?? '').trim().replace(/[a-z]/g, char => char.toUpperCase());
+}
+
+function registrationLink(role, code = referralCode()) {
+  const params = new URLSearchParams({register:role});
+  if (code) params.set('ref', code);
+  return '/?' + params;
+}
+
+function showRegistration(role) {
+  const code = referralCode();
+  const locked = new URLSearchParams(location.search).has('ref');
+  $('#app').innerHTML = `<main class="login paper">
+    <h1>${role === 'coach' ? 'Регистрация тренера' : 'Регистрация клиента'}</h1>
+    <form id="registration-referral">
+      <label for="registration-surname">Фамилия</label>
+      <input id="registration-surname" name="surname" autocomplete="family-name" maxlength="50" required>
+      <label for="registration-name">Имя</label>
+      <input id="registration-name" name="given_name" autocomplete="given-name" maxlength="50" required>
+      <label for="registration-email">Email</label>
+      <input id="registration-email" name="email" type="email" autocomplete="email" maxlength="254" required>
+      <label for="registration-phone">Сотовый телефон</label>
+      <input id="registration-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32">
+      <label for="registration-password">Пароль</label>
+      <input id="registration-password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required aria-describedby="registration-strength-label">
+      <div class="strength registration-strength" id="registration-strength" hidden>
+        <div class="strength-bar" aria-hidden="true">${'<span class="strength-segment"></span>'.repeat(4)}</div>
+        <small id="registration-strength-label" role="status"></small>
+      </div>
+      <label for="registration-password-confirmation">Подтвердите пароль</label>
+      <input id="registration-password-confirmation" name="password_confirmation" type="password"
+        autocomplete="new-password" minlength="8" maxlength="128" required>
+      <label for="registration-promo">Промокод</label>
+      <input id="registration-promo" name="code" value="${esc(code)}" maxlength="5" autocomplete="off" aria-describedby="registration-promo-tooltip" ${locked ? 'disabled readonly' : ''}>
+      <div id="registration-promo-tooltip" class="tooltip registration-promo-tooltip" role="tooltip" hidden>
+        <span class="tooltip-arrow"></span><span class="tooltip-inner" aria-live="polite"></span>
+      </div>
+      <div class="actions"><button type="submit">Зарегистрироваться</button></div>
+      <p id="registration-result" role="status"></p>
+    </form>
+    <p><a href="${esc(registrationLink(role === 'coach' ? 'user' : 'coach', code))}">
+      ${role === 'coach' ? 'Регистрация клиента' : 'Регистрация тренера'}</a></p>
+    <p><a href="/">Вернуться ко входу</a></p>
+  </main>`;
+  const form = $('#registration-referral');
+  const password = form.elements.password;
+  const confirmation = form.elements.password_confirmation;
+  const strength = $('#registration-strength');
+  const strengthLabel = $('#registration-strength-label');
+  const checkConfirmation = () => {
+    confirmation.setCustomValidity(confirmation.value && confirmation.value !== password.value
+      ? 'Пароли не совпадают' : '');
+  };
+  password.addEventListener('input', () => {
+    const value = password.value;
+    const length = Array.from(value).length;
+    const variety = [/\p{Ll}/u, /\p{Lu}/u, /\p{Nd}/u, /[^\p{L}\p{N}\s]/u]
+      .filter(pattern => pattern.test(value)).length;
+    const score = length < 8 ? 1 : Math.min(4, 1 + Number(length >= 12) + Number(length >= 16) + Number(variety >= 3));
+    strength.hidden = !value;
+    strength.dataset.level = score;
+    strengthLabel.textContent = ['Слабый пароль', 'Средняя сложность', 'Хороший пароль', 'Высокая сложность'][score - 1];
+    checkConfirmation();
+  });
+  confirmation.addEventListener('input', checkConfirmation);
+  const phone = form.elements.phone;
+  const telephone = window.intlTelInput?.(phone, {
+    initialCountry:'ru', separateDialCode:true, strictMode:true,
+    loadUtils: () => import('https://cdn.jsdelivr.net/npm/intl-tel-input@25.2.1/build/js/utils.js')
+  });
+  const input = form.elements.code;
+  const status = $('#registration-result');
+  const tooltip = $('#registration-promo-tooltip');
+  const tooltipText = tooltip.querySelector('.tooltip-inner');
+  const showCodeResult = (message, valid) => {
+    tooltip.classList.toggle('theme-success', valid);
+    tooltip.classList.toggle('theme-danger', !valid);
+    tooltip.hidden = false;
+    tooltipText.textContent = message;
+  };
+  input.oninput = () => {
+    tooltipText.textContent = '';
+    tooltip.hidden = true;
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Escape') tooltip.hidden = true;
+  });
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const submit = form.querySelector('[type=submit]');
+    checkConfirmation();
+    if (!form.reportValidity()) return;
+    const fields = Object.fromEntries(new FormData(form));
+    fields.code = locked ? code : (fields.code || '').trim();
+    status.textContent = '';
+    tooltip.hidden = true;
+    submit.disabled = true;
+    try {
+      if (telephone && fields.phone.trim()) {
+        await telephone.promise;
+        if (!telephone.isValidNumber()) throw Error('Введите корректный номер телефона');
+        fields.phone = telephone.getNumber();
+      }
+      await api('register', {...fields, role});
+      history.replaceState(null, '', '/');
+      login();
+      $('#email').value = fields.email.trim().toLowerCase();
+      $('#password').focus();
+      toast('Аккаунт создан. Войдите с новым паролем.');
+    } catch (error) {
+      if (error.message.startsWith('Промокод') || error.message.startsWith('Введите промокод')) {
+        showCodeResult(error.message, false);
+      } else {
+        status.textContent = error.message;
+      }
+    } finally {
+      submit.disabled = false;
+    }
+  };
+}
+
+function login(){state=null;const ref=referralCode();$('#app').innerHTML=`<div class="container px-4"><div class="row justify-content-center"><main class="login col-12 col-sm-10 col-md-8 col-lg-6"><h1>ПланТренировок</h1><p class="muted">Ваш план. Ваш темп. Ваш прогресс.</p><h2>Войти в аккаунт</h2><p><a href="${esc(registrationLink('user'))}">Регистрация клиента</a> · <a href="${esc(registrationLink('coach'))}">Регистрация тренера</a></p>${ref ? `<p>Промокод из ссылки: <strong>${esc(ref)}</strong></p>` : ""}<form id="login" class="row gy-2"><div class="col-12"><label for="email">Электронная почта</label><input id="email" type="email" required autocomplete="username"></div><div class="col-12"><label for="password">Пароль</label><input id="password" type="password" required autocomplete="current-password"></div><div class="col-12"><button type="submit">Войти</button></div><p id="loginError" class="error col-12" role="alert"></p></form><div class="demo"><p><b>Локальная демонстрация</b><br><small>Выберите роль и введите пароль из файла data/demo-password.txt.</small></p>${[['user','Пользователь'],['coach','Тренер'],['admin','Администратор']].map(([r,n])=>`<button class="secondary" data-demo="${r}">${n}</button>`).join('')}</div></main></div></div>`;document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>{$('#email').value=b.dataset.demo+'@demo.local';$('#password').focus()});$('#login').onsubmit=async e=>{e.preventDefault();try{await api('login',{email:$('#email').value,password:$('#password').value});page='home';selected=null;await load()}catch(err){$('#loginError').textContent=err.message}}}
+function render(){const u=state.user,role=u.role;const coachId=new URLSearchParams(location.search).get('coach');const roleLinks=role==='admin'?[['trainers','Тренеры'],['admin-clients','Клиенты'],['library','Упражнения'],['references','Справочники'],['audit','Протокол']]:role==='coach'?[['profile','Мой профиль'],['templates','Мои тренировки'],['programs','Мои программы'],['promo-codes','Промокоды'],['workouts','Отчеты клиентов'],['clients','Клиенты'],['library','Упражнения']]:[['profile','Мой профиль'],['workouts','План Тренировок'],['history','История занятий'],['measurements','Замеры тела'],['library','Все упражнения']];const links=roleLinks;if(page!=='home'&&!(role==='coach'&&page==='builder')&&!links.some(x=>x[0]===page))page=links[0][0];$('#app').innerHTML=`<div class="container-fluid px-0"><div class="row g-0 min-vh-100"><aside class="col-12 col-md-4 col-lg-3 col-xl-2 px-4"><strong><a href="/" style="color:inherit">ПланТренировок</a></strong><small>Пространство для движения</small><nav>${links.map(([id,n])=>`<button data-nav="${id}" class="${(page===id || (page==='builder' && id==='templates'))?'active':''}">${n}</button>`).join('')}</nav><div class="account"><div>${esc(u.name)}<br><small>${{user:'Пользователь',coach:'Тренер',admin:'Администратор'}[role]}</small></div><button id="logout" class="secondary">Выйти</button></div></aside><main id="content" class="col-12 col-md-8 col-lg-9 col-xl-10 px-4"></main></div></div>`;document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{if(location.search)history.replaceState(null,'','/');page=b.dataset.nav;selected=null;render()});$('#logout').onclick=()=>run(async()=>{await api('logout',{});login()});const clientId = new URLSearchParams(location.search).get('client');
 if (role === 'admin' && clientId) {
   const client = state.users.find(user => user.role === 'user' && user.id === Number(clientId));
   if (client) showClientCreate({...client, login:client.email, email:client.email.endsWith('@login.invalid') ? '' : client.email});
@@ -21,24 +143,39 @@ if (role === 'admin' && clientId) {
 if(role==='admin' && coachId){adminCoachProfile(Number(coachId));return;}if(page==='home') {
   $('#content').innerHTML = '<h1>'+({admin:'Главная администратора',coach:'Главная тренера',user:'Главная клиента'}[role])+'</h1>';
   if (role === 'admin') showAdminDashboard();
+  if (role === 'user') {
+    $('#content').insertAdjacentHTML('beforeend', `
+      <div class="row g-3">
+        <div class="col-12 col-lg-4"><section class="paper client-home-card"><h2>Не забудьте заполнить профиль</h2><a href="#profile" data-client-home="profile">Заполнить профиль</a></section></div>
+        <div class="col-12 col-lg-4"><section class="paper client-home-card"><h2>Посмотрите готовые планы тренировок</h2><a href="#workouts" data-client-home="workouts">Посмотреть планы тренировок</a></section></div>
+        <div class="col-12 col-lg-4"><section class="paper client-home-card"><h2>Посмотрите виды упражнений</h2><a href="#library" data-client-home="library">Посмотреть все упражнения</a></section></div>
+      </div>`);
+  }
+  $('#content').querySelectorAll('[data-client-home]').forEach(link => {
+    link.onclick = event => {
+      event.preventDefault();
+      $('#app').querySelector('[data-nav="' + link.dataset.clientHome + '"]').click();
+    };
+  });
   if (role === 'coach') adminBreadcrumb('Главная');
-} else if(page==='audit')showAuditLog();else if(page==='references')showReferences();else if(page==='profile')coachProfile();else if(page==='clients')manageClients();else if(page==='library')library();else if(page==='trainers')trainers();else if(page==='admin-clients')adminClients();else if(page==='programs')coachPrograms();else if(page==='builder')builder();else if(page==='templates'&&!selected)coachTemplates();else if(selected)workout();else overview()}
-function overview(){const coach=state.user.role==='coach';let ws=state.workouts.filter(w=>coach ? w.client!==null : page!=='history'||Object.keys(w.result).length);$('#content').innerHTML=`<div class="top"><div><h1>${page==='history'?'История занятий':coach?'Отчеты клиентов':'Ваш план тренировок'}</h1><p class="muted">${coach?'Назначения и фактические результаты ваших клиентов.':'Открывайте тренировку и сохраняйте результат после каждого упражнения.'}</p></div>${coach?'<button id="coach-profile">Мой профиль</button>':'<span class="tag">Личный дневник</span>'}</div>${!coach&&page!=='history'?'<div class="paper"><h2>Начните с движения</h2><p>В основе — первая неделя вашего плана. Разминка: экстензия и ротаторы, динамическая растяжка. Заминка: растяжка и 10 минут кардио.</p><small>Внесена первая неделя из примеров. Остальные недели предстоит добавить.</small></div>':''}<div class="list">${ws.map(w=>{const done=Object.values(w.result).filter(r=>r.done).length;return `<div class="entry-row"><div>${validMedia(w.details?.cover)&&w.details.gallery?.find(m=>m.url===w.details.cover)?.type!=='video'?'<img width="120" loading="lazy" alt="" src="'+esc(w.details.cover)+'">':''}<h3>${esc(w.title)}</h3>${w.client===null?'<span class="tag">Шаблон</span>':''}<small>${coach?esc(state.users.find(u=>u.id===w.client)?.name)+' · ':''}${w.items.length} упражнения · отмечено ${done} из ${w.items.length}</small>${w.updated?`<p><small>Последнее сохранение: ${esc(w.updated)} UTC</small></p>`:''}</div><button data-open="${w.id}">${coach?(w.client===null?'Открыть шаблон':'Результаты'):done?'Продолжить':'Открыть'}</button></div>`}).join('')||'<p class="empty">Здесь пока нет тренировок.</p>'}</div>`;if(coach)adminBreadcrumb('Отчеты клиентов');if($('#coach-profile'))$('#coach-profile').onclick=()=>{page='profile';render()};document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{selected=+b.dataset.open;render()})}
+} else if(page==='audit')showAuditLog();else if(page==='references')showReferences();else if(page==='profile')coachProfile();else if(page==='measurements')run(() => showMeasurementDiary());else if(page==='clients')manageClients();else if(page==='library')library();else if(page==='trainers')trainers();else if(page==='admin-clients')adminClients();else if(page==='promo-codes')showPromoCodes();else if(page==='programs')coachPrograms();else if(page==='builder')builder();else if(page==='templates'&&!selected)coachTemplates();else if(selected)workout();else overview()}
+function overview(){const coach=state.user.role==='coach';let ws=state.workouts.filter(w=>coach ? w.client!==null : page!=='history'||Object.keys(w.result).length);$('#content').innerHTML=`<div class="top"><div><h1>${page==='history'?'История занятий':coach?'Отчеты клиентов':'Ваш план тренировок'}</h1><p class="muted">${coach?'Назначения и фактические результаты ваших клиентов.':'Открывайте тренировку и сохраняйте результат после каждого упражнения.'}</p></div>${coach?'<button id="coach-profile">Мой профиль</button>':'<span class="tag">Личный дневник</span>'}</div>${!coach&&page!=='history'?'<div class="paper"><h2>Начните с движения</h2><p>В основе — первая неделя вашего плана. Разминка: экстензия и ротаторы, динамическая растяжка. Заминка: растяжка и 10 минут кардио.</p><small>Внесена первая неделя из примеров. Остальные недели предстоит добавить.</small></div>':''}<div class="list">${ws.map(w=>{const done=Object.values(w.result).filter(r=>r.done).length;return `<div class="entry-row"><div>${validMedia(w.details?.cover)&&w.details.gallery?.find(m=>m.url===w.details.cover)?.type!=='video'?'<img width="120" loading="lazy" alt="" src="'+esc(w.details.cover)+'">':''}<h3>${esc(w.title)}</h3>${w.client===null?'<span class="tag">Шаблон</span>':''}<small>${coach?esc(state.users.find(u=>u.id===w.client)?.name)+' · ':''}${w.items.length} упражнения · отмечено ${done} из ${w.items.length}</small>${w.updated?`<p><small>Последнее сохранение: ${esc(w.updated)} UTC</small></p>`:''}</div><button data-open="${w.id}">${coach?(w.client===null?'Открыть шаблон':'Результаты'):done?'Продолжить':'Открыть'}</button></div>`}).join('')||'<p class="empty">Здесь пока нет тренировок.</p>'}</div>`;if(coach)adminBreadcrumb('Отчеты клиентов');else adminBreadcrumb(page==='history'?'История занятий':'Ваш план тренировок');if($('#coach-profile'))$('#coach-profile').onclick=()=>{page='profile';render()};document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{selected=+b.dataset.open;render()})}
 function media(url){if(!url||!validMedia(url))return '<small>Материалы по технике пока не добавлены.</small>';return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Открыть картинку или видео по технике</a>`}
 function workout(){const w=state.workouts.find(w=>w.id===selected),readonly=state.user.role!=='user';$('#content').innerHTML=`<button class="secondary" id="back">Вернуться к плану</button><h1 style="margin-top:24px">${esc(w.title)}</h1><p class="muted">${readonly?'Назначение тренера и сохранённое выполнение клиента.':'Отмечайте подходы, затем сохраняйте результат упражнения.'}</p><p>${esc(w.details?.description)}</p><div class="actions">${orderedGallery(w.details).filter(m=>validMedia(m.url)).map(m=>m.type==='photo'?'<a href="'+esc(m.url)+'" target="_blank" rel="noopener"><img width="150" alt="Фото тренировки" src="'+esc(m.url)+'"></a>':m.url.startsWith('/uploads/')?'<video controls preload="metadata" width="240" src="'+esc(m.url)+'"></video>':media(m.url)).join('')}</div>${w.client===null?'<form id="assign"><label>Назначить клиенту<select name="client" required><option value="">Выберите клиента</option>'+state.users.filter(u=>u.role==='user').map(u=>'<option value="'+u.id+'">'+esc(u.name)+'</option>').join('')+'</select></label><button>Назначить копию</button></form>':''}<div class="paper">${w.items.map((it,i)=>{const ex=state.exercises.find(e=>e.id===+it.exercise),r=w.result[i]||{},sets=r.sets||[];return `<section class="exercise" data-ex="${i}"><h3>${i+1}. ${esc(ex?.name)} ${readonly?`<span class="tag">${r.done?'Упражнение выполнено':r.sets?'Результат сохранён':'Нет результата'}</span>`:''}</h3><div class="exercise-summary"><p class="muted">${it.sets} подхода · ${esc(it.reps)} повторений${i===0?` · ${it.warmup||0} разминочных`:''}</p>${readonly && r.note?.trim() ? `<details class="client-comment"><summary>Комментарий клиента</summary><p>${esc(r.note)}</p></details>` : ''}</div>${readonly?'':`<details><summary>Техника выполнения</summary><p>${esc(ex?.instruction)}</p>${media(it.media||ex?.media)}<p>${esc(it.note)}</p></details>`}<table class="${readonly ? 'table table-hover workout-report' : ''}"><thead><tr><th>Подход</th><th>Вес, кг</th><th>${it.reps.includes('сек')?'Секунды':'Повторения'}</th><th>Готово</th></tr></thead><tbody>${Array.from({length:+it.sets},(_,j)=>`<tr><td>${j+1}</td><td>${readonly?esc(sets[j]?.weight===''?'-':sets[j]?.weight??'-'):`<input aria-label="Вес, подход ${j+1}" type="number" min="0" max="2000" step="0.5" data-weight value="${esc(sets[j]?.weight||'')}" ${readonly?'disabled':''}>`}</td><td>${readonly?esc(sets[j]?.reps===''?'-':sets[j]?.reps??'-'):`<input aria-label="Повторения или секунды, подход ${j+1}" type="number" min="0" max="10000" data-reps value="${esc(sets[j]?.reps||'')}" ${readonly?'disabled':''}>`}</td><td>${readonly?resultIcon(sets[j]?.done):`<input aria-label="Подход ${j+1} выполнен" type="checkbox" data-check ${sets[j]?.done?'checked':''} ${readonly?'disabled':''}>`}</td></tr>`).join('')}</tbody></table>${readonly?'':`<label>Комментарий ${readonly?'пользователя':''}<textarea data-note ${readonly?'disabled':''}>${esc(r.note||'')}</textarea></label>`}${readonly?'':`<div class="actions"><button data-save="${i}">Сохранить результат</button><label style="margin:0;display:flex;align-items:center;gap:10px"><input data-complete type="checkbox" ${r.done?'checked':''}>Упражнение выполнено</label></div>`}</section>`}).join('')}</div>`;if(w.client===null) templateSummary(w);else if(state.user.role==='coach'){
   adminBreadcrumb('Отчеты клиентов',w.title);
   $('#content').insertAdjacentHTML('beforeend','<div class="actions"><button type="button" class="secondary" id="print-workout">Распечатать в PDF</button></div>');
   $('#print-workout').onclick = () => printWorkout(w);
-}if($('#assign'))$('#assign').onsubmit=e=>{e.preventDefault();run(async()=>{await api('workouts',{template:w.id,assignments:[...e.target.querySelectorAll('input:checked')].map(input=>({client:Number(input.value),from:input.closest('tr').querySelector('[name=from]').value,to:input.closest('tr').querySelector('[name=to]').value}))});selected=null;await load();toast('Копия назначена клиенту')})};if($('#back'))$('#back').onclick=()=>{selected=null;render()};document.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>run(async()=>{const section=b.closest('section'),i=b.dataset.save;const next={...w.result,[i]:{sets:[...section.querySelectorAll('tbody tr')].map(tr=>({weight:tr.querySelector('[data-weight]').value,reps:tr.querySelector('[data-reps]').value,done:tr.querySelector('[data-check]').checked})),note:section.querySelector('[data-note]').value,done:section.querySelector('[data-complete]').checked}};b.disabled=true;try{await api('results',{workout:w.id,result:next});w.result=next;toast('Результат сохранён на сервере')}finally{b.disabled=false}}))}
+}if($('#assign'))$('#assign').onsubmit=e=>{e.preventDefault();run(async()=>{await api('workouts',{template:w.id,assignments:[...e.target.querySelectorAll('input:checked')].map(input=>({client:Number(input.value),from:input.closest('tr').querySelector('[name=from]').value,to:input.closest('tr').querySelector('[name=to]').value}))});selected=null;await load();toast('Копия назначена клиенту')})};if($('#back'))$('#back').onclick=()=>{selected=null;render()};document.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>run(async()=>{const section=b.closest('section'),i=b.dataset.save;const next={...w.result,[i]:{sets:[...section.querySelectorAll('tbody tr')].map(tr=>({weight:tr.querySelector('[data-weight]').value,reps:tr.querySelector('[data-reps]').value,done:tr.querySelector('[data-check]').checked})),note:section.querySelector('[data-note]').value,done:section.querySelector('[data-complete]').checked}};b.disabled=true;try{const saved=await api('results',{workout:w.id,result:next});w.result=next;if(saved.awarded_stars){state.user=(await api('state')).user;showStarReward(saved.awarded_stars,'За завершённую тренировку вам начислено')}else toast('Результат сохранён на сервере')}finally{b.disabled=false}}))}
 function library() {
+  const client = state.user.role === 'user';
   const admin = state.user.role === 'admin';
-  const exercises = [...state.exercises].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  const exercises = state.exercises.filter(exercise => !client || exercise.moderation_status === 'approved').sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   $('#content').innerHTML = `<div class="top">
-    <h1>${admin ? 'Библиотека упражнений' : 'Упражнения'}</h1>
-    ${admin ? '<button id="add-exercise">Добавить упражнение</button>' : '<button id="add-exercise">Предложить упражнение</button>'}
+    <h1>${admin ? 'Библиотека упражнений' : client ? 'Все упражнения' : 'Упражнения'}</h1>
+    ${client ? '' : admin ? '<button id="add-exercise">Добавить упражнение</button>' : '<button id="add-exercise">Предложить упражнение</button>'}
     </div><p class="muted">Общие упражнения для программ всех тренеров.</p>
     <div id="exercise-stats" aria-live="polite"></div>
-    ${admin ? `
+    ${client ? table(exercises, 'Все упражнения') : admin ? `
       <section class="paper"><h2>На модерации</h2>
         ${table(exercises.filter(exercise => exercise.moderation_status === 'pending'), 'На модерации', false, 'Нет упражнений, требующих модерации.')}
       </section>
@@ -68,10 +205,10 @@ function library() {
       </table>
     </div>`;
   }
-  loadExerciseStats($('#exercise-stats'));
+  if (!client) loadExerciseStats($('#exercise-stats'));
   adminBreadcrumb('Упражнения');
   const add = $('#add-exercise');
-  add.onclick = () => run(async () => {
+  if (add) add.onclick = () => run(async () => {
     const references = await api('references');
     if (add.isConnected) showExerciseCreate({}, {}, references);
   });
@@ -229,7 +366,7 @@ function editCoachProgram(program) {
       <td><select aria-label="Шаблон тренировки" name="template" required>
         <option value="">Выберите тренировку</option>
         ${templates.map(w => `<option value="${w.id}">${esc(w.title)}</option>`).join('')}
-      </select></td><td><button type="button" class="secondary">Удалить</button></td>`;
+      </select></td><td><button type="button" class="theme-danger action-with-icon">${actionIcon("delete")}Удалить</button></td>`;
     row.querySelector('select').value = templates.some(w => w.id === item.template) ? item.template : '';
     row.querySelector('button').onclick = () => { if (rows.children.length > 1) row.remove(); };
     rows.append(row);
@@ -329,10 +466,10 @@ function exerciseOptions(selectedId) {
 }
 
 function drawDraft(allowRemoval = false){$('#drafts').innerHTML=draft.map((it,i)=>`<section class="builder"><div class="d-flex align-items-center" style="gap:12px;margin-bottom:8px"><h3 style="margin:0">Упражнение ${i+1}</h3>
-${allowRemoval ? `<button type="button" class="secondary" data-remove-template-item="${i}" aria-label="Удалить упражнение ${i+1}" ${draft.length === 1 ? 'disabled' : ''}>Удалить</button>` : ''}</div><label>Из библиотеки<select data-field="exercise">${exerciseOptions(it.exercise)}</select></label><div class="row gy-2"><label class="col-12">Рабочие подходы<input data-field="sets" type="number" min="1" max="20" required value="${it.sets}"></label><label class="col-12">Повторения или время<input data-field="reps" required value="${esc(it.reps)}"></label><label class="col-12">Разминочные подходы<input data-field="warmup" type="number" min="0" max="10" value="${it.warmup}"></label></div><label>Указания тренера<textarea data-field="note">${esc(it.note)}</textarea></label></section>`).join('')}
+${allowRemoval ? `<button type="button" class="theme-danger action-with-icon" data-remove-template-item="${i}" aria-label="Удалить упражнение ${i+1}" ${draft.length === 1 ? 'disabled' : ''}>${actionIcon("delete")}Удалить</button>` : ''}</div><label>Из библиотеки<select data-field="exercise">${exerciseOptions(it.exercise)}</select></label><div class="row gy-2"><label class="col-12">Рабочие подходы<input data-field="sets" type="number" min="1" max="20" required value="${it.sets}"></label><label class="col-12">Повторения или время<input data-field="reps" required value="${esc(it.reps)}"></label><label class="col-12">Разминочные подходы<input data-field="warmup" type="number" min="0" max="10" value="${it.warmup}"></label></div><label>Указания тренера<textarea data-field="note">${esc(it.note)}</textarea></label></section>`).join('')}
 let lastActivityPing = -Infinity;
 function recordClientActivity(event) {
-  if (!event.isTrusted || state?.user.role !== 'user' || performance.now() - lastActivityPing < 15000) return;
+  if (!event.isTrusted || !['user', 'coach'].includes(state?.user.role) || performance.now() - lastActivityPing < 15000) return;
   lastActivityPing = performance.now();
   api('activity', {}).catch(() => {});
 }
@@ -353,7 +490,10 @@ if (verificationToken) {
     }
   };
 } else {
-  load();
+  const registrationRole = new URLSearchParams(location.search).get('register');
+  if (['user', 'coach'].includes(registrationRole)) showRegistration(registrationRole);
+  else if (referralCode()) showRegistration('user');
+  else load();
 }
 
 function validMedia(url) {
@@ -563,7 +703,7 @@ function editTemplateMedia(workout, profile = false, saveDraft = null, backToDra
   if (profile && !saveDraft && ['admin', 'coach'].includes(state.user.role)) back.remove();
   else back.onclick = saveDraft ? backToDraft : render;
   function draw() {
-    $('#gallery-order').innerHTML = gallery.map((item, position) => `<li class="entry-row"><div class="media-choice">${mediaPreview(item, position)}<label><input type="radio" name="main-media" value="${position}" ${item===main?'checked':''}> Главный файл</label></div><div class="actions"><button data-move="-1" data-position="${position}" ${position===0?'disabled':''}>Выше</button><button data-move="1" data-position="${position}" ${position===gallery.length-1?'disabled':''}>Ниже</button><button class="secondary" data-remove-media="${position}">Удалить</button></div></li>`).join('');
+    $('#gallery-order').innerHTML = gallery.map((item, position) => `<li class="entry-row"><div class="media-choice">${mediaPreview(item, position)}<label><input type="radio" name="main-media" value="${position}" ${item===main?'checked':''}> Главный файл</label></div><div class="actions"><button data-move="-1" data-position="${position}" ${position===0?'disabled':''}>Выше</button><button data-move="1" data-position="${position}" ${position===gallery.length-1?'disabled':''}>Ниже</button><button class="theme-danger action-with-icon" data-remove-media="${position}">${actionIcon("delete")}Удалить</button></div></li>`).join('');
     document.querySelectorAll('[name=main-media]').forEach(input => input.onchange = () => { main = gallery[Number(input.value)]; });
     document.querySelectorAll('[data-move]').forEach(button => button.onclick = () => {
       const from = Number(button.dataset.position);
@@ -681,38 +821,30 @@ function renderCoachClients({clients, page:current, pages, offset}) {
   };
 }
 
-function clientProfileCompletion(user, media) {
-  const text = value => Boolean(value?.trim());
-  const email = text(user.email) && !user.email.trim().toLowerCase().endsWith('@login.invalid');
-  const phone = text(user.phone);
-  const photos = new Set((media.gallery || [])
-    .filter(item => item.type === 'photo' && validMedia(item.url))
-    .map(item => item.url)).size;
-  const location = user.profile_location;
-  return [
-    [text(user.surname), 5],
-    [text(user.given_name), 5],
-    [text(user.patronymic), 5],
-    [user.birth_date, 10],
-    [text(location?.country) && text(location?.city), 10],
-    [user.communication_languages?.length, 10],
-    [phone, 5],
-    [phone && user.phone_verified, 5],
-    [email, 5],
-    [email && user.email_verified, 5],
-    [photos >= 1, 5],
-    [photos >= 2, 5],
-    [user.body_measurement_count > 0, 5],
-    [user.linked_social_count >= 1, 5],
-    [user.linked_social_count >= 2, 10]
-  ].reduce((total, [earned, points]) => total + (earned ? points : 0), 0);
-}
-
 function clientProfileCompletionTheme(percent) {
   if (percent > 80) return 'success';
   if (percent > 50) return 'primary';
   if (percent > 25) return 'warning';
   return 'secondary';
+}
+
+async function showStarHistory() {
+  $('#content').innerHTML = '<h1>История начислений и списаний</h1><p role="status">Загрузка…</p>';
+  adminBreadcrumb('Мой профиль', 'История начислений и списаний');
+  $('#content [data-breadcrumb-section]').onclick = event => { event.preventDefault(); coachProfile(); };
+  const pending = $('#content').lastElementChild;
+  const rows = await api('star-history');
+  if (!pending.isConnected) return;
+  const reasonLabel = reason => {
+    if (reason === 'registration') return 'Регистрация';
+    if (/^workout_completed_\d+$/.test(reason)) return 'Завершение тренировки';
+    if (/^body_measurement_\d+$/.test(reason)) return 'Новая запись замеров тела';
+    if (reason === 'promo_registration') return 'Регистрация по промокоду';
+    if (/^promo_invite_\d+$/.test(reason)) return 'Приглашение пользователя по промокоду';
+    const milestone = /^profile_(25|50|75|100)$/.exec(reason);
+    return milestone ? 'Заполнение профиля на ' + milestone[1] + '%' : reason;
+  };
+  pending.outerHTML = `<div class="table-responsive"><table class="table table-hover align-top"><thead><tr><th scope="col">№</th><th scope="col">Дата</th><th scope="col">Сумма (+/−)</th><th scope="col">Операция</th></tr></thead><tbody>${rows.map((row,index) => `<tr><td>${index + 1}</td><td>${esc(new Intl.DateTimeFormat('ru-RU', {dateStyle:'short',timeStyle:'short',timeZone:'Europe/Moscow'}).format(new Date(row.awarded_at)))}</td><td>${Number(row.amount) > 0 ? '+' : ''}${esc(row.amount)}</td><td>${esc(reasonLabel(row.reason))}</td></tr>`).join('') || '<tr><td colspan="4">Операций пока нет.</td></tr>'}</tbody></table></div>`;
 }
 
 function coachProfile() {
@@ -726,7 +858,7 @@ function coachProfile() {
   const fullName = [user.surname, user.given_name, user.patronymic].filter(Boolean).join(' ') || user.name;
   const contact = values.email || user.phone;
   const details = JSON.parse(user.profile_media || '{}');
-  const completion = isCoach ? 0 : clientProfileCompletion(values, details);
+  const completion = user.profile_completion ?? 0;
   const completionTheme = clientProfileCompletionTheme(completion);
   const fields = [
     ['surname', 'Фамилия', 'text', 'family-name', 50, true],
@@ -737,7 +869,6 @@ function coachProfile() {
   ];
   $('#content').innerHTML = `
     <h1>${isCoach ? "Профиль тренера" : "Мой профиль"}</h1>
-    ${isCoach ? '' : `
       <section class="paper client-profile-summary">
         <div class="client-profile-identity">
           ${clientAvatar(user, user.activity)}
@@ -754,13 +885,14 @@ function coachProfile() {
           </div>
           <progress class="theme-${completionTheme}" aria-labelledby="profile-completion-label" max="100" value="${completion}"></progress>
           ${completion < 100 ? '<p>Пожалуйста, завершите создание профиля, заполнив недостающие поля.</p>' : ''}
+          <p><strong>Баланс звезд: ${starIcon()} ${esc(user.star_balance ?? 0)}</strong> <a href="#star-history" id="profile-star-history">история начислений и списаний</a></p>
         </div>
-      </section>`}
+      </section>
     <form id="profile-form" class="paper">
       <fieldset>
         <legend>${isCoach ? 'Личные данные' : 'Личные сведения'}</legend>
-        <div class="row">${(isCoach ? fields : fields.slice(0, 3)).map(([key,label,type,autocomplete,maxLength,required])=>`
-          <div class="mb-3 col-12 ${!isCoach && key !== 'surname' ? 'col-sm-6' : ''}">
+        <div class="row">${fields.slice(0, 3).map(([key,label,type,autocomplete,maxLength,required])=>`
+          <div class="mb-3 col-12 ${key !== 'surname' ? 'col-sm-6' : ''}">
             <label for="profile-${key}" class="form-label">${label}</label>
             <input id="profile-${key}" name="${key}" type="${type}" class="form-control"
               autocomplete="${autocomplete}" maxlength="${maxLength}" value="${esc(values[key])}"
@@ -789,16 +921,17 @@ function coachProfile() {
             </div>`).join('')}
             </div></details>
         </fieldset>
-        ${isCoach ? '' : `<div class="row">${fields.slice(3).map(([key,label,type,autocomplete,maxLength,required])=>`
-          <div class="mb-3 col-12 ${!isCoach && key !== 'surname' ? 'col-sm-6' : ''}">
+        <div class="row">${fields.slice(3).map(([key,label,type,autocomplete,maxLength,required])=>`
+          <div class="mb-3 col-12 ${key !== 'surname' ? 'col-sm-6' : ''}">
             <label for="profile-${key}" class="form-label">${label}</label>
             <input id="profile-${key}" name="${key}" type="${type}" class="form-control"
               autocomplete="${autocomplete}" maxlength="${maxLength}" value="${esc(values[key])}"
               ${type==='tel'?'inputmode="numeric"':''} ${required?'required':''}>
-          </div>`).join('')}</div>`}
+          </div>`).join('')}</div>
         ${isCoach ? coachBioFields(user.coach_bio) : ''}<button type="submit">Сохранить профиль</button>
       </fieldset>
     </form>`;
+  $('#profile-header-logout').onclick = () => $('#logout').click();
   const languages = $('#profile-languages');
   const updateLanguageSummary = () => {
     const checked = languages.querySelectorAll('input:checked');
@@ -846,15 +979,17 @@ function coachProfile() {
   renderGalleryPreview($('#profile-gallery'), details, () => editTemplateMedia({title:user.name,details}, true), isCoach ? 3 : undefined);
   if (!isCoach) {
     $('#content').insertAdjacentHTML('beforeend', `
-      <section class="paper"><h2>Замеры тела</h2><p class="muted">Дневник замеров пока недоступен.</p></section>
       <section class="paper"><h2>Управление учётной записью</h2>
         <button type="button" class="secondary" id="profile-logout">Выйти</button>
       </section>`);
     $('#profile-logout').onclick = () => $('#logout').click();
-    $('#profile-header-logout').onclick = () => $('#logout').click();
   }
+  adminBreadcrumb('Мой профиль');
+  $('#profile-star-history').onclick = event => {
+    event.preventDefault();
+    run(() => showStarHistory());
+  };
   if (isCoach) {
-    adminBreadcrumb('Мой профиль');
     renderCoachSocialAccounts();
     renderCoachBioLists(user.coach_bio);
   }
@@ -1035,7 +1170,7 @@ function renderCoachDelete(coach) {
         <div class="switch"><input type="checkbox" id="confirm-coach-delete" role="switch" switch></div>
         <label for="confirm-coach-delete">Подтверждаю ${restoring ? "восстановление" : "удаление"} аккаунта тренера</label>
       </div>
-      <button type="button" class="secondary" id="delete-coach" disabled>${restoring ? "Восстановить" : "Удалить"}</button>
+      <button type="button" class="${restoring ? 'secondary' : 'theme-danger action-with-icon'}" id="delete-coach" disabled>${restoring ? "Восстановить" : actionIcon("delete") + "Удалить"}</button>
   </section>`);
   const confirm = $('#confirm-coach-delete');
   const button = $('#delete-coach');
@@ -1190,7 +1325,7 @@ async function showAuditLog(requested = 1) {
     const roles = {user:'Клиент', coach:'Тренер', admin:'Администратор'};
     const actions = {insert:'Добавление', update:'Редактирование', delete:'Удаление', login:'Вход',
       logout:'Выход', upload:'Загрузка', email_confirm:'Подтверждение почты',
-      email_verification_sent:'Отправка ссылки'};
+      email_verification_sent:'Отправка ссылки', star_award:'Начисление звёзд'};
     pending.outerHTML = `<div class="table-responsive clients-table">
       <table class="table align-top" aria-label="История работы">
         <thead><tr><th scope="col">Время (МСК)</th><th scope="col">Автор</th>
@@ -1207,4 +1342,237 @@ async function showAuditLog(requested = 1) {
   } catch (error) {
     if (pending.isConnected) pending.textContent = error.message;
   }
+}
+
+
+async function showPromoCodes() {
+  const content = $('#content');
+  content.innerHTML = '<h1>Промокоды</h1><p role="status">Загрузка…</p>';
+  const pending = content.lastElementChild;
+  adminBreadcrumb('Промокоды');
+  try {
+    const codes = await api('promo-codes');
+    if (!pending.isConnected) return;
+    pending.outerHTML = `<form class="paper" id="promo-create">
+      <label for="promo-comment">Комментарий</label>
+      <input id="promo-comment" name="comment" maxlength="250">
+      <div class="actions"><button type="submit">Создать промокод</button></div>
+    </form>
+    <div class="table-responsive clients-table"><table class="table promo-codes-table">
+      <thead><tr><th>Промокод</th><th>Комментарий</th><th>Действия</th></tr></thead>
+      <tbody>${codes.map(code => `<tr>
+        <td><strong>${esc(code.code)}</strong></td>
+        <td style="overflow-wrap:anywhere">${esc(code.comment || '—')}</td>
+        <td><div class="actions"><button type="button" class="secondary action-with-icon" data-copy-code="${esc(code.code)}">${actionIcon("copy")}Копировать код</button><button type="button" class="secondary" data-copy-ref="${esc(code.code)}">Копировать ссылку</button>
+        <button type="button" class="theme-danger action-with-icon" data-delete-code="${code.id}">${actionIcon("delete")}Удалить</button></div></td></tr>`).join('')
+        || '<tr><td colspan="3">Промокодов пока нет.</td></tr>'}</tbody>
+    </table></div>`;
+    async function change(button, body) {
+      button.disabled = true;
+      try {
+        await api('promo-codes', body);
+        if (button.isConnected) await showPromoCodes();
+      } finally { button.disabled = false; }
+    }
+    $('#promo-create').onsubmit = event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      return run(() => change(form.querySelector('button'), {action:'create', ...Object.fromEntries(new FormData(form))}));
+    };
+    content.querySelectorAll('[data-copy-code]').forEach(button => button.onclick = () => run(async () => {
+      await navigator.clipboard.writeText(button.dataset.copyCode);
+      toast('Промокод скопирован');
+    }));
+    content.querySelectorAll('[data-copy-ref]').forEach(button => button.onclick = () => run(async () => {
+      const url = new URL('/', location.origin);
+      url.searchParams.set('ref', button.dataset.copyRef);
+      await navigator.clipboard.writeText(url.href);
+      toast('Реферальная ссылка скопирована');
+    }));
+    content.querySelectorAll('[data-delete-code]').forEach(button => button.onclick = () => {
+      if (confirm('Удалить промокод?')) run(() => change(button, {action:'delete', id:Number(button.dataset.deleteCode)}));
+    });
+  } catch (error) {
+    if (pending.isConnected) pending.textContent = error.message;
+  }
+}
+
+
+function actionIcon(action) {
+  const path = action === 'copy'
+    ? 'M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2v2a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm1 2h5a2 2 0 0 1 2 2v5h2a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z'
+    : 'M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708';
+  return `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false"><path d="${path}"/></svg>`;
+}
+
+
+function showBodyMeasurements() {
+  $('#content').innerHTML = `
+    <h1>Как правильно делать замеры тела</h1>
+    <article class="paper">
+      <img src="/body-measurements.png" alt="Схема замеров: шея, грудь, плечо, талия, таз, бедро и голень" style="display:block;width:100%;height:auto;max-height:none">
+      <h2>Что мерить</h2>
+      <p>Выберите несколько зон с учётом своей цели. При снижении веса полезно следить за талией, а при наборе мышечной массы — за обхватом плеча, груди и бёдер. Записывайте значения в сантиметрах.</p>
+      <ul>
+        <li><strong>Шея.</strong> Чуть ниже кадыка.</li>
+        <li><strong>Грудь.</strong> По наиболее выступающей части груди, проводя ленту под мышками.</li>
+        <li><strong>Плечо (бицепс).</strong> В самой широкой части руки между плечом и локтем. Каждый раз измеряйте руку в одном и том же состоянии — расслабленном или напряжённом.</li>
+        <li><strong>Талия.</strong> В самом узком месте или на уровне пупка. Выберите один ориентир и повторяйте его.</li>
+        <li><strong>Таз.</strong> Вокруг таза по наиболее выступающей части ягодиц.</li>
+        <li><strong>Бедро.</strong> Вокруг одной ноги в её самой широкой части, чуть ниже ягодичной складки.</li>
+        <li><strong>Голень.</strong> По самой широкой части икры.</li>
+      </ul>
+      <h2>Несколько важных правил</h2>
+      <ul>
+        <li>Делайте замеры в одинаковых условиях. Удобно утром, после туалета и до еды или тренировки.</li>
+        <li>Пользуйтесь одной и той же мягкой нерастяжимой лентой. Лента должна прилегать к коже без вдавливания.</li>
+        <li>На груди, талии и бёдрах держите ленту параллельно полу. Проверьте её положение в зеркале или попросите кого-нибудь помочь.</li>
+        <li>Стойте прямо, держите ноги вместе и не втягивайте живот.</li>
+        <li>Измерьте каждый обхват дважды. Если разница больше 0,5 см, сделайте третий замер и запишите среднее двух наиболее близких значений.</li>
+        <li>Записывайте ориентиры, например «талия — на уровне пупка». Для рук и ног каждый раз измеряйте одну сторону или записывайте обе отдельно.</li>
+      </ul>
+      <h2>Что ещё учесть</h2>
+      <p>Повторяйте замеры раз в 2–4 недели. Сопоставляйте динамику обхватов с весом, результатами тренировок и самочувствием. Если делаете фото, сохраняйте одинаковые освещение, ракурс и одежду.</p>
+      <p>По одним обхватам нельзя определить, сколько жира ушло или сколько мышц прибавилось. Первые замеры нужны как точка отсчёта для сравнения с будущими результатами.</p>
+    </article>`;
+  adminBreadcrumb('Замеры тела', 'Как правильно делать замеры тела');
+  $('#content [data-breadcrumb-section]').onclick = event => {
+    event.preventDefault();
+    page = 'measurements';
+    run(() => showMeasurementDiary());
+  };
+}
+
+function starIcon() {
+  return `<svg class="bi bi-star-fill" width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false" style="vertical-align:-0.125em"><path d="M3.612 15.443c-.386.198-.824-.149-.746-.592l.83-4.73L.173 6.765c-.329-.314-.158-.888.283-.95l4.898-.696L7.538.792c.197-.39.73-.39.927 0l2.184 4.327 4.898.696c.441.062.612.636.282.95l-3.522 3.356.83 4.73c.078.443-.36.79-.746.592L8 13.187z"/></svg>`;
+}
+
+function showStarReward(amount, description) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'dialog measurement-reward-dialog';
+  dialog.setAttribute('aria-labelledby', 'measurement-reward-title');
+  dialog.setAttribute('aria-describedby', 'measurement-reward-description');
+  dialog.innerHTML = `
+    <div class="dialog-header"><h2 class="dialog-title" id="measurement-reward-title">Поздравляем!</h2></div>
+    <div class="dialog-body">
+      <div class="measurement-reward-stars" aria-hidden="true">${starIcon().repeat(Math.min(amount, 5))}</div>
+      <p id="measurement-reward-description">${esc(description)} <strong>${esc(amount)} звёзд</strong>.</p>
+    </div>
+    <div class="dialog-footer">
+      <button type="button" class="secondary" data-reward-close autofocus>Закрыть</button>
+      <button type="button" data-reward-profile>Перейти в профиль</button>
+    </div>`;
+  dialog.querySelector('[data-reward-close]').onclick = () => dialog.close();
+  dialog.querySelector('[data-reward-profile]').onclick = () => {
+    dialog.close();
+    page = 'profile';
+    selected = null;
+    render();
+  };
+  dialog.addEventListener('close', () => dialog.remove(), {once:true});
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+function measurementSchedule(records, today) {
+  const shiftDays = (value, days) => {
+    const date = new Date(value + 'T00:00:00Z');
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+  };
+  const latest = records.reduce((date, row) => row.measured_on > date ? row.measured_on : date, '');
+  const cutoff = shiftDays(today, -14);
+  return {latest, next:latest ? shiftDays(latest, 14) : null, due:!latest || latest <= cutoff};
+}
+
+async function showMeasurementDiary() {
+  const content = $('#content');
+  content.innerHTML = '<h1>Замеры тела</h1><p role="status">Загрузка…</p>';
+  const pending = content.lastElementChild;
+  const records = await api('body-measurements');
+  if (!pending.isConnected) return;
+  const groups = [
+    ['Шея', [[['neck','Шея']]]],
+    ['Плечо (бицепс)', [[['arm','Плечо (бицепс)',true]]]],
+    ['Грудь', [[['chest','Грудь']]]],
+    ['Талия', [[['waist','Талия']]]],
+    ['Таз', [[['hips','Таз']]]],
+    ['Бедро', [[['thigh','Бедро',true]]]],
+    ['Голень', [[['calf','Голень',true]]]]
+  ].map(([title, rows]) => [title, rows.map(fields => fields.flatMap(([key, label, paired]) =>
+    paired ? [['left','слева'],['right','справа']].map(([side, text]) => [key + '_' + side, label + ' ' + text]) : [[key, label]]
+  ))]);
+  const labels = new Map(groups.flatMap(([,rows]) => rows.flat()));
+  const historicalLabels = {
+    abdomen:'Живот', shoulders:'Плечевой корпус', underbust:'Под грудью'
+  };
+  for (const [key, label] of Object.entries({forearm:'Предплечье', wrist:'Запястье', knee:'Колено', ankle:'Лодыжка'})) {
+    historicalLabels[key + '_left'] = label + ' слева';
+    historicalLabels[key + '_right'] = label + ' справа';
+  }
+  const today = new Intl.DateTimeFormat('sv-SE', {timeZone:'Europe/Moscow'}).format(new Date());
+  const schedule = measurementSchedule(records, today);
+  const displayDate = value => value.split('-').reverse().join('.');
+  const recommendation = schedule.latest
+    ? `<p>Последний замер: <strong>${esc(displayDate(schedule.latest))}</strong>. Следующий рекомендуемый замер: <strong>${esc(displayDate(schedule.next))}</strong>.</p>${schedule.due ? '<p><strong>За последние две недели новых замеров не было. Рекомендуем сделать замер в ближайшие дни.</strong></p>' : ''}`
+    : '<p><strong>Замеров пока нет. Рекомендуем сделать первый замер в ближайшие дни.</strong> Следующую дату рассчитаем через две недели после него.</p>';
+  function draw(entry) {
+    content.innerHTML = `<h1>Замеры тела</h1>
+
+      <form class="paper" id="measurement-form">
+        <div class="top"><h2 style="margin:0">${entry ? 'Редактировать замеры' : 'Новые замеры'}</h2>
+          <button type="button" class="secondary" id="measurements-guide">Как делать замеры</button></div>
+        ${entry ? '' : recommendation}
+        <label for="measurement-date"><strong>Дата замера *</strong></label>
+        <input id="measurement-date" name="measured_on" type="date" required max="${today}"
+          value="${esc(entry?.measured_on || today)}" ${entry ? 'readonly' : ''}>
+        <p>Укажите хотя бы один обхват в сантиметрах.</p>
+        ${groups.map(([title, rows]) => `<fieldset class="mb-3"><legend>${title}</legend>${rows.map(fields => `<div class="row">${fields.map(([key,label]) => `
+            <div class="col-12 col-sm-6">
+              <label for="measure-${key}">${label}</label>
+              <input id="measure-${key}" name="${key}" type="number" inputmode="decimal" min="0.1" max="500" step="0.1"
+                value="${esc(entry?.measurements[key])}">
+            </div>`).join('')}</div>`).join('')}</fieldset>`).join('')}
+        <div class="actions"><button type="submit">Сохранить замеры</button>
+          ${entry ? '<button type="button" class="secondary" id="new-measurement">Новая запись</button>' : ''}</div>
+      </form>
+      <section class="paper"><h2>История замеров</h2>
+        ${records.map(record => `<div class="entry-row"><div><strong>${esc(record.measured_on.split('-').reverse().join('.'))}</strong>
+          <ul>${Object.entries(record.measurements).map(([key,value]) => `<li>${esc(labels.get(key) || historicalLabels[key] || key)}: ${esc(value)} см</li>`).join('')}</ul></div>
+          <button type="button" class="secondary" data-measurement="${record.id}">Редактировать</button></div>`).join('') || '<p>Замеров пока нет.</p>'}
+      </section>`;
+    adminBreadcrumb('Замеры тела');
+
+    $('#measurements-guide').onclick = showBodyMeasurements;
+    if (entry) $('#new-measurement').onclick = () => draw();
+    content.querySelectorAll('[data-measurement]').forEach(button => {
+      button.onclick = () => draw(records.find(record => record.id === Number(button.dataset.measurement)));
+    });
+    $('#measurement-form').onsubmit = event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = new FormData(form);
+      const measurements = Object.fromEntries([...labels.keys()].filter(key => data.get(key) !== '')
+        .map(key => [key, Number(data.get(key))]));
+      for (const [key, value] of Object.entries(entry?.measurements || {})) {
+        if (!labels.has(key)) measurements[key] = value;
+      }
+      if (!Object.keys(measurements).length) return toast('Укажите хотя бы один замер');
+      const button = form.querySelector('[type=submit]');
+      button.disabled = true;
+      run(async () => {
+        try {
+          await api('body-measurements', {id:entry?.id, measured_on:data.get('measured_on'), measurements});
+          if (form.isConnected) await showMeasurementDiary();
+          const updated = await api('state');
+          state.user = updated.user;
+          if (entry) toast('Замеры сохранены');
+          else showStarReward(5, 'За сохранение новых замеров тела вам начислено');
+        } finally {
+          button.disabled = false;
+        }
+      });
+    };
+  }
+  draw();
 }
