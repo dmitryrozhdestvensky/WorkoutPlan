@@ -464,15 +464,30 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond(200, {'counts':counts, 'started_at':started_at})
                 if self.path in ('/api/clients', '/api/coaches') and method == 'GET':
                     coaches = self.path == '/api/coaches'
-                    if role not in ('admin', 'coach') or (coaches and role != 'admin'):
+                    if (coaches and role not in ('admin', 'user')) or (not coaches and role not in ('admin', 'coach')):
                         return self.respond(403, {'error':'Нет доступа'})
-                    requested = max(1, int(self.query.get('page', ['1'])[0]))
+                    page_value = self.query.get('page', ['1'])[0]
+                    if not re.fullmatch(r'[0-9]{1,9}', page_value):
+                        raise ValueError('Неверный номер страницы')
+                    requested = max(1, int(page_value))
                     page_size = 10
                     scope = "role='coach'" if coaches else "role='user'"
                     params = ()
                     if role == 'coach':
                         scope += ' AND coach=? AND is_del=0'
                         params = (uid,)
+                    invited_by = None
+                    if coaches and role == 'user':
+                        scope += ' AND is_del=0'
+                        referral = c.execute("""
+                            SELECT p.owner_id FROM promo_redemptions r
+                            JOIN promo_codes p ON p.id=r.promo_code_id
+                            JOIN users owner ON owner.id=p.owner_id
+                            WHERE r.user_id=? AND owner.role='coach'
+                        """, (uid,)).fetchone()
+                        invited_by = referral['owner_id'] if referral else None
+                    order = 'CASE WHEN id=? THEN 0 ELSE 1 END, id' if invited_by else 'id'
+                    order_params = (invited_by,) if invited_by else ()
                     total = c.execute(f'SELECT count(*) FROM users WHERE {scope}', params).fetchone()[0]
                     pages = max(1, (total + page_size - 1) // page_size)
                     current = min(requested, pages)
@@ -481,10 +496,11 @@ class Handler(BaseHTTPRequestHandler):
                         f'SELECT id,name,email,phone,surname,given_name,patronymic,profile_media,is_del, '
                         "CASE WHEN is_del=0 AND last_activity_at>=CURRENT_TIMESTAMP - INTERVAL '10 minutes' THEN 'online' "
                         "WHEN is_del=0 AND last_activity_at>=CURRENT_TIMESTAMP - INTERVAL '30 minutes' THEN 'recent' END AS activity "
-                        f'FROM users WHERE {scope} ORDER BY id LIMIT ? OFFSET ?',
-                        (*params, page_size, offset))]
+                        f'FROM users WHERE {scope} ORDER BY {order} LIMIT ? OFFSET ?',
+                        (*params, *order_params, page_size, offset))]
                     if coaches:
                         for coach in clients:
+                            coach['invited_you'] = coach['id'] == invited_by
                             coach['client_count'] = c.execute(
                                 "SELECT count(*) FROM users WHERE role='user' AND is_del=0 AND coach=?",
                                 (coach['id'],)).fetchone()[0]
