@@ -11,7 +11,7 @@ function styleFormFields() {
 const formObserver = new MutationObserver(styleFormFields);
 formObserver.observe(document.querySelector("#app"), {childList:true, subtree:true});
 function login(){state=null;$('#app').innerHTML=`<div class="container px-4"><div class="row justify-content-center"><main class="login col-12 col-sm-10 col-md-8 col-lg-6"><h1>ПланТренировок</h1><p class="muted">Ваш план. Ваш темп. Ваш прогресс.</p><h2>Войти в аккаунт</h2><form id="login" class="row gy-2"><div class="col-12"><label for="email">Электронная почта</label><input id="email" type="email" required autocomplete="username"></div><div class="col-12"><label for="password">Пароль</label><input id="password" type="password" required autocomplete="current-password"></div><div class="col-12"><button type="submit">Войти</button></div><p id="loginError" class="error col-12" role="alert"></p></form><div class="demo"><p><b>Локальная демонстрация</b><br><small>Выберите роль и введите пароль из файла data/demo-password.txt.</small></p>${[['user','Пользователь'],['coach','Тренер'],['admin','Администратор']].map(([r,n])=>`<button class="secondary" data-demo="${r}">${n}</button>`).join('')}</div></main></div></div>`;document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>{$('#email').value=b.dataset.demo+'@demo.local';$('#password').focus()});$('#login').onsubmit=async e=>{e.preventDefault();try{await api('login',{email:$('#email').value,password:$('#password').value});page='home';selected=null;await load()}catch(err){$('#loginError').textContent=err.message}}}
-function render(){const u=state.user,role=u.role;const coachId=new URLSearchParams(location.search).get('coach');const roleLinks=role==='admin'?[['trainers','Тренеры'],['admin-clients','Клиенты'],['library','Упражнения'],['references','Справочники']]:role==='coach'?[['profile','Мой профиль'],['templates','Мои тренировки'],['programs','Мои программы'],['workouts','Отчеты клиентов'],['clients','Клиенты'],['library','Упражнения']]:[['workouts','Мой план'],['history','История занятий'],['profile','Мой профиль']];const links=role!=='user'?roleLinks:[['home','Главная'],...roleLinks];if(page!=='home'&&!(role==='coach'&&page==='builder')&&!links.some(x=>x[0]===page))page=links[0][0];$('#app').innerHTML=`<div class="container-fluid px-0"><div class="row g-0 min-vh-100"><aside class="col-12 col-md-4 col-lg-3 col-xl-2 px-4"><strong>${role!=='user'?'<a href="/" style="color:inherit">ПланТренировок</a>':'ПланТренировок'}</strong><small>Пространство для движения</small><nav>${links.map(([id,n])=>`<button data-nav="${id}" class="${(page===id || (page==='builder' && id==='templates'))?'active':''}">${n}</button>`).join('')}</nav><div class="account"><div>${esc(u.name)}<br><small>${{user:'Пользователь',coach:'Тренер',admin:'Администратор'}[role]}</small></div><button id="logout" class="secondary">Выйти</button></div></aside><main id="content" class="col-12 col-md-8 col-lg-9 col-xl-10 px-4"></main></div></div>`;document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{if(location.search)history.replaceState(null,'','/');page=b.dataset.nav;selected=null;render()});$('#logout').onclick=()=>run(async()=>{await api('logout',{});login()});const clientId = new URLSearchParams(location.search).get('client');
+function render(){const u=state.user,role=u.role;const coachId=new URLSearchParams(location.search).get('coach');const roleLinks=role==='admin'?[['trainers','Тренеры'],['admin-clients','Клиенты'],['library','Упражнения'],['references','Справочники'],['audit','Протокол']]:role==='coach'?[['profile','Мой профиль'],['templates','Мои тренировки'],['programs','Мои программы'],['workouts','Отчеты клиентов'],['clients','Клиенты'],['library','Упражнения']]:[['workouts','Мой план'],['history','История занятий'],['profile','Мой профиль']];const links=role!=='user'?roleLinks:[['home','Главная'],...roleLinks];if(page!=='home'&&!(role==='coach'&&page==='builder')&&!links.some(x=>x[0]===page))page=links[0][0];$('#app').innerHTML=`<div class="container-fluid px-0"><div class="row g-0 min-vh-100"><aside class="col-12 col-md-4 col-lg-3 col-xl-2 px-4"><strong>${role!=='user'?'<a href="/" style="color:inherit">ПланТренировок</a>':'ПланТренировок'}</strong><small>Пространство для движения</small><nav>${links.map(([id,n])=>`<button data-nav="${id}" class="${(page===id || (page==='builder' && id==='templates'))?'active':''}">${n}</button>`).join('')}</nav><div class="account"><div>${esc(u.name)}<br><small>${{user:'Пользователь',coach:'Тренер',admin:'Администратор'}[role]}</small></div><button id="logout" class="secondary">Выйти</button></div></aside><main id="content" class="col-12 col-md-8 col-lg-9 col-xl-10 px-4"></main></div></div>`;document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{if(location.search)history.replaceState(null,'','/');page=b.dataset.nav;selected=null;render()});$('#logout').onclick=()=>run(async()=>{await api('logout',{});login()});const clientId = new URLSearchParams(location.search).get('client');
 if (role === 'admin' && clientId) {
   const client = state.users.find(user => user.role === 'user' && user.id === Number(clientId));
   if (client) showClientCreate({...client, login:client.email, email:client.email.endsWith('@login.invalid') ? '' : client.email});
@@ -22,7 +22,7 @@ if(role==='admin' && coachId){adminCoachProfile(Number(coachId));return;}if(page
   $('#content').innerHTML = '<h1>'+({admin:'Главная администратора',coach:'Главная тренера',user:'Главная клиента'}[role])+'</h1>';
   if (role === 'admin') showAdminDashboard();
   if (role === 'coach') adminBreadcrumb('Главная');
-} else if(page==='references')showReferences();else if(page==='profile')coachProfile();else if(page==='clients')manageClients();else if(page==='library')library();else if(page==='trainers')trainers();else if(page==='admin-clients')adminClients();else if(page==='programs')coachPrograms();else if(page==='builder')builder();else if(page==='templates'&&!selected)coachTemplates();else if(selected)workout();else overview()}
+} else if(page==='audit')showAuditLog();else if(page==='references')showReferences();else if(page==='profile')coachProfile();else if(page==='clients')manageClients();else if(page==='library')library();else if(page==='trainers')trainers();else if(page==='admin-clients')adminClients();else if(page==='programs')coachPrograms();else if(page==='builder')builder();else if(page==='templates'&&!selected)coachTemplates();else if(selected)workout();else overview()}
 function overview(){const coach=state.user.role==='coach';let ws=state.workouts.filter(w=>coach ? w.client!==null : page!=='history'||Object.keys(w.result).length);$('#content').innerHTML=`<div class="top"><div><h1>${page==='history'?'История занятий':coach?'Отчеты клиентов':'Ваш план тренировок'}</h1><p class="muted">${coach?'Назначения и фактические результаты ваших клиентов.':'Открывайте тренировку и сохраняйте результат после каждого упражнения.'}</p></div>${coach?'<button id="coach-profile">Мой профиль</button>':'<span class="tag">Личный дневник</span>'}</div>${!coach&&page!=='history'?'<div class="paper"><h2>Начните с движения</h2><p>В основе — первая неделя вашего плана. Разминка: экстензия и ротаторы, динамическая растяжка. Заминка: растяжка и 10 минут кардио.</p><small>Внесена первая неделя из примеров. Остальные недели предстоит добавить.</small></div>':''}<div class="list">${ws.map(w=>{const done=Object.values(w.result).filter(r=>r.done).length;return `<div class="entry-row"><div>${validMedia(w.details?.cover)&&w.details.gallery?.find(m=>m.url===w.details.cover)?.type!=='video'?'<img width="120" loading="lazy" alt="" src="'+esc(w.details.cover)+'">':''}<h3>${esc(w.title)}</h3>${w.client===null?'<span class="tag">Шаблон</span>':''}<small>${coach?esc(state.users.find(u=>u.id===w.client)?.name)+' · ':''}${w.items.length} упражнения · отмечено ${done} из ${w.items.length}</small>${w.updated?`<p><small>Последнее сохранение: ${esc(w.updated)} UTC</small></p>`:''}</div><button data-open="${w.id}">${coach?(w.client===null?'Открыть шаблон':'Результаты'):done?'Продолжить':'Открыть'}</button></div>`}).join('')||'<p class="empty">Здесь пока нет тренировок.</p>'}</div>`;if(coach)adminBreadcrumb('Отчеты клиентов');if($('#coach-profile'))$('#coach-profile').onclick=()=>{page='profile';render()};document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{selected=+b.dataset.open;render()})}
 function media(url){if(!url||!validMedia(url))return '<small>Материалы по технике пока не добавлены.</small>';return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Открыть картинку или видео по технике</a>`}
 function workout(){const w=state.workouts.find(w=>w.id===selected),readonly=state.user.role!=='user';$('#content').innerHTML=`<button class="secondary" id="back">Вернуться к плану</button><h1 style="margin-top:24px">${esc(w.title)}</h1><p class="muted">${readonly?'Назначение тренера и сохранённое выполнение клиента.':'Отмечайте подходы, затем сохраняйте результат упражнения.'}</p><p>${esc(w.details?.description)}</p><div class="actions">${orderedGallery(w.details).filter(m=>validMedia(m.url)).map(m=>m.type==='photo'?'<a href="'+esc(m.url)+'" target="_blank" rel="noopener"><img width="150" alt="Фото тренировки" src="'+esc(m.url)+'"></a>':m.url.startsWith('/uploads/')?'<video controls preload="metadata" width="240" src="'+esc(m.url)+'"></video>':media(m.url)).join('')}</div>${w.client===null?'<form id="assign"><label>Назначить клиенту<select name="client" required><option value="">Выберите клиента</option>'+state.users.filter(u=>u.role==='user').map(u=>'<option value="'+u.id+'">'+esc(u.name)+'</option>').join('')+'</select></label><button>Назначить копию</button></form>':''}<div class="paper">${w.items.map((it,i)=>{const ex=state.exercises.find(e=>e.id===+it.exercise),r=w.result[i]||{},sets=r.sets||[];return `<section class="exercise" data-ex="${i}"><h3>${i+1}. ${esc(ex?.name)} ${readonly?`<span class="tag">${r.done?'Упражнение выполнено':r.sets?'Результат сохранён':'Нет результата'}</span>`:''}</h3><div class="exercise-summary"><p class="muted">${it.sets} подхода · ${esc(it.reps)} повторений${i===0?` · ${it.warmup||0} разминочных`:''}</p>${readonly && r.note?.trim() ? `<details class="client-comment"><summary>Комментарий клиента</summary><p>${esc(r.note)}</p></details>` : ''}</div>${readonly?'':`<details><summary>Техника выполнения</summary><p>${esc(ex?.instruction)}</p>${media(it.media||ex?.media)}<p>${esc(it.note)}</p></details>`}<table class="${readonly ? 'table table-hover workout-report' : ''}"><thead><tr><th>Подход</th><th>Вес, кг</th><th>${it.reps.includes('сек')?'Секунды':'Повторения'}</th><th>Готово</th></tr></thead><tbody>${Array.from({length:+it.sets},(_,j)=>`<tr><td>${j+1}</td><td>${readonly?esc(sets[j]?.weight===''?'-':sets[j]?.weight??'-'):`<input aria-label="Вес, подход ${j+1}" type="number" min="0" max="2000" step="0.5" data-weight value="${esc(sets[j]?.weight||'')}" ${readonly?'disabled':''}>`}</td><td>${readonly?esc(sets[j]?.reps===''?'-':sets[j]?.reps??'-'):`<input aria-label="Повторения или секунды, подход ${j+1}" type="number" min="0" max="10000" data-reps value="${esc(sets[j]?.reps||'')}" ${readonly?'disabled':''}>`}</td><td>${readonly?resultIcon(sets[j]?.done):`<input aria-label="Подход ${j+1} выполнен" type="checkbox" data-check ${sets[j]?.done?'checked':''} ${readonly?'disabled':''}>`}</td></tr>`).join('')}</tbody></table>${readonly?'':`<label>Комментарий ${readonly?'пользователя':''}<textarea data-note ${readonly?'disabled':''}>${esc(r.note||'')}</textarea></label>`}${readonly?'':`<div class="actions"><button data-save="${i}">Сохранить результат</button><label style="margin:0;display:flex;align-items:center;gap:10px"><input data-complete type="checkbox" ${r.done?'checked':''}>Упражнение выполнено</label></div>`}</section>`}).join('')}</div>`;if(w.client===null) templateSummary(w);else if(state.user.role==='coach'){
@@ -330,7 +330,31 @@ function exerciseOptions(selectedId) {
 
 function drawDraft(allowRemoval = false){$('#drafts').innerHTML=draft.map((it,i)=>`<section class="builder"><div class="d-flex align-items-center" style="gap:12px;margin-bottom:8px"><h3 style="margin:0">Упражнение ${i+1}</h3>
 ${allowRemoval ? `<button type="button" class="secondary" data-remove-template-item="${i}" aria-label="Удалить упражнение ${i+1}" ${draft.length === 1 ? 'disabled' : ''}>Удалить</button>` : ''}</div><label>Из библиотеки<select data-field="exercise">${exerciseOptions(it.exercise)}</select></label><div class="row gy-2"><label class="col-12">Рабочие подходы<input data-field="sets" type="number" min="1" max="20" required value="${it.sets}"></label><label class="col-12">Повторения или время<input data-field="reps" required value="${esc(it.reps)}"></label><label class="col-12">Разминочные подходы<input data-field="warmup" type="number" min="0" max="10" value="${it.warmup}"></label></div><label>Указания тренера<textarea data-field="note">${esc(it.note)}</textarea></label></section>`).join('')}
-load();
+let lastActivityPing = -Infinity;
+function recordClientActivity(event) {
+  if (!event.isTrusted || state?.user.role !== 'user' || performance.now() - lastActivityPing < 15000) return;
+  lastActivityPing = performance.now();
+  api('activity', {}).catch(() => {});
+}
+$('#app').addEventListener('click', recordClientActivity);
+$('#app').addEventListener('keydown', recordClientActivity);
+
+const verificationToken = new URLSearchParams(location.hash.slice(1)).get('verify-email');
+if (verificationToken) {
+  history.replaceState(null, '', location.pathname + location.search);
+  $('#app').innerHTML = '<main class="login paper"><h1>Подтверждение почты</h1><p id="verification-result" role="status"></p><button type="button" id="confirm-email">Подтвердить почту</button><p><a href="/">На главную</a></p></main>';
+  $('#confirm-email').onclick = async event => {
+    event.currentTarget.disabled = true;
+    try {
+      await api('email-confirm', {token:verificationToken});
+      $('#verification-result').textContent = 'Почта подтверждена.';
+    } catch (error) {
+      $('#verification-result').textContent = error.message;
+    }
+  };
+} else {
+  load();
+}
 
 function validMedia(url) {
   return typeof url === 'string' && (url.startsWith('https://') || /^\/uploads\/(?:(?:admin|coach|user)\/[0-9]{4}\/[0-9]{2}\/[0-9]{2}\/)?[a-f0-9]{32}\.(jpg|png|webp|mp4|webm)$/.test(url));
@@ -621,7 +645,7 @@ function manageClients(requested = 1) {
 function renderCoachClients({clients, page:current, pages, offset}) {
   $('#content').innerHTML = `${selected ? '<button class="secondary" id="clients-back">Вернуться к шаблону</button>' : ''}<div class="top"><h1>Клиенты</h1><button id="open-client-create">Добавить клиента</button></div><h2 id="my-clients-title">Мои клиенты</h2><div class="table-responsive table-card clients-table"><table class="table table-striped align-top account-list-table" aria-labelledby="my-clients-title"><thead><tr><th scope="col">№</th><th scope="col">Аватар</th><th scope="col">ФИО</th><th scope="col">Назначенные тренировки</th></tr></thead><tbody>${clients.map((u,index)=>{
     const workouts = u.workouts;
-    return `<tr><th scope="row">${offset+index+1}</th><td>${clientAvatar(u)}</td><td><a href="#client-${u.id}" data-client-profile="${u.id}">${accountListName(u)}</a>${accountListContacts(u)}</td><td>${workouts.length ? '<ul>'+workouts.map(workout=>'<li>'+esc(workout)+'</li>').join('')+'</ul>' : '—'}</td></tr>`;
+    return `<tr><th scope="row">${offset+index+1}</th><td>${clientAvatar(u)}</td><td><a href="#client-${u.id}" data-client-profile="${u.id}">${accountListName(u)}</a>${accountListContacts(u)}${clientActivityLabel(u.activity)}</td><td>${workouts.length ? '<ul>'+workouts.map(workout=>'<li>'+esc(workout)+'</li>').join('')+'</ul>' : '—'}</td></tr>`;
   }).join('')||'<tr><td colspan="4">Пока нет клиентов</td></tr>'}</tbody></table></div>${clientPagination(current,pages)}<form id="client-search"><label>Поиск по имени или почте<input name="query" minlength="3" maxlength="254" required></label></form><div id="client-results"></div>`;
   adminBreadcrumb('Клиенты');
   bindClientPagination(manageClients);
@@ -657,6 +681,40 @@ function renderCoachClients({clients, page:current, pages, offset}) {
   };
 }
 
+function clientProfileCompletion(user, media) {
+  const text = value => Boolean(value?.trim());
+  const email = text(user.email) && !user.email.trim().toLowerCase().endsWith('@login.invalid');
+  const phone = text(user.phone);
+  const photos = new Set((media.gallery || [])
+    .filter(item => item.type === 'photo' && validMedia(item.url))
+    .map(item => item.url)).size;
+  const location = user.profile_location;
+  return [
+    [text(user.surname), 5],
+    [text(user.given_name), 5],
+    [text(user.patronymic), 5],
+    [user.birth_date, 10],
+    [text(location?.country) && text(location?.city), 10],
+    [user.communication_languages?.length, 10],
+    [phone, 5],
+    [phone && user.phone_verified, 5],
+    [email, 5],
+    [email && user.email_verified, 5],
+    [photos >= 1, 5],
+    [photos >= 2, 5],
+    [user.body_measurement_count > 0, 5],
+    [user.linked_social_count >= 1, 5],
+    [user.linked_social_count >= 2, 10]
+  ].reduce((total, [earned, points]) => total + (earned ? points : 0), 0);
+}
+
+function clientProfileCompletionTheme(percent) {
+  if (percent > 80) return 'success';
+  if (percent > 50) return 'primary';
+  if (percent > 25) return 'warning';
+  return 'secondary';
+}
+
 function coachProfile() {
   const user = state.user;
   const isCoach = user.role === "coach";
@@ -665,27 +723,62 @@ function coachProfile() {
     values.given_name = user.name;
   }
   if (values.email?.endsWith('@login.invalid')) values.email = '';
+  const fullName = [user.surname, user.given_name, user.patronymic].filter(Boolean).join(' ') || user.name;
+  const contact = values.email || user.phone;
+  const details = JSON.parse(user.profile_media || '{}');
+  const completion = isCoach ? 0 : clientProfileCompletion(values, details);
+  const completionTheme = clientProfileCompletionTheme(completion);
   const fields = [
     ['surname', 'Фамилия', 'text', 'family-name', 50, true],
-    ['given_name', 'Имя', 'text', 'given-name', 50, true],
+    ['given_name', 'Имя', 'text', 'given-name', 50, isCoach],
     ['patronymic', 'Отчество', 'text', 'additional-name', 50, false],
     ['email', 'Email', 'email', 'email', 254, isCoach],
     ['phone', 'Сотовый телефон', 'tel', 'tel', 32, false]
   ];
   $('#content').innerHTML = `
     <h1>${isCoach ? "Профиль тренера" : "Мой профиль"}</h1>
+    ${isCoach ? '' : `
+      <section class="paper client-profile-summary">
+        <div class="client-profile-identity">
+          ${clientAvatar(user, user.activity)}
+          <div class="client-profile-contact">
+            <h2>${esc(fullName)}</h2>
+            ${contact ? `<p class="muted">${esc(contact)}</p>` : ''}
+          </div>
+          <button type="button" id="profile-header-logout">Выход</button>
+        </div>
+        <div class="client-profile-completion">
+          <div class="client-profile-progress-label">
+            <h3 id="profile-completion-label">Полнота профиля</h3>
+            <strong>${completion}%</strong>
+          </div>
+          <progress class="theme-${completionTheme}" aria-labelledby="profile-completion-label" max="100" value="${completion}"></progress>
+          ${completion < 100 ? '<p>Пожалуйста, завершите создание профиля, заполнив недостающие поля.</p>' : ''}
+        </div>
+      </section>`}
     <form id="profile-form" class="paper">
       <fieldset>
-        <legend>Личные данные</legend>
-        ${fields.map(([key,label,type,autocomplete,maxLength,required])=>`
-          <div class="mb-3">
+        <legend>${isCoach ? 'Личные данные' : 'Личные сведения'}</legend>
+        <div class="row">${(isCoach ? fields : fields.slice(0, 3)).map(([key,label,type,autocomplete,maxLength,required])=>`
+          <div class="mb-3 col-12 ${!isCoach && key !== 'surname' ? 'col-sm-6' : ''}">
             <label for="profile-${key}" class="form-label">${label}</label>
             <input id="profile-${key}" name="${key}" type="${type}" class="form-control"
               autocomplete="${autocomplete}" maxlength="${maxLength}" value="${esc(values[key])}"
               ${type==='tel'?'inputmode="numeric"':''} ${required?'required':''}>
-          </div>`).join('')}
+          </div>`).join('')}</div>
+        ${isCoach ? '' : `
+        <div class="mb-3">
+          <label for="profile-birth-date" class="form-label">Дата рождения</label>
+          <input id="profile-birth-date" name="birth_date" type="date" class="form-control"
+            autocomplete="bday" value="${esc(values.birth_date)}"
+            aria-describedby="profile-birth-date-help">
+          <small id="profile-birth-date-help" ${values.birth_date ? 'hidden' : ''}>Без даты рождения мы не можем определить ваш возраст. Некоторые функции сайта могут быть недоступны.</small>
+        </div>`}
         <div id="profile-geography"></div>
         <fieldset class="mb-3"><legend>Язык общения</legend>
+          <details id="profile-languages" class="profile-languages">
+            <summary class="form-control combobox-toggle" aria-label="Язык общения"><span class="combobox-value"></span></summary>
+            <div class="menu">
           ${[['ru','Русский'], ['en','Английский'], ['tt','Татарский'],
             ['uz','Узбекский'], ['kk','Казахский'], ['pt','Португальский'],
             ['es','Испанский'], ['it','Итальянский'], ['de','Немецкий']].map(([code,name]) => `
@@ -694,14 +787,72 @@ function coachProfile() {
                 name="communication_languages" value="${code}" ${user.communication_languages?.includes(code) ? 'checked' : ''}>
               <label for="profile-lang-${code}">${name}</label>
             </div>`).join('')}
+            </div></details>
         </fieldset>
+        ${isCoach ? '' : `<div class="row">${fields.slice(3).map(([key,label,type,autocomplete,maxLength,required])=>`
+          <div class="mb-3 col-12 ${!isCoach && key !== 'surname' ? 'col-sm-6' : ''}">
+            <label for="profile-${key}" class="form-label">${label}</label>
+            <input id="profile-${key}" name="${key}" type="${type}" class="form-control"
+              autocomplete="${autocomplete}" maxlength="${maxLength}" value="${esc(values[key])}"
+              ${type==='tel'?'inputmode="numeric"':''} ${required?'required':''}>
+          </div>`).join('')}</div>`}
         ${isCoach ? coachBioFields(user.coach_bio) : ''}<button type="submit">Сохранить профиль</button>
       </fieldset>
     </form>`;
+  const languages = $('#profile-languages');
+  const updateLanguageSummary = () => {
+    const checked = languages.querySelectorAll('input:checked');
+    languages.querySelector('.combobox-value').textContent = checked.length > 1
+      ? `Выбрано: ${checked.length}`
+      : checked[0]?.labels[0]?.textContent || 'Выберите языки';
+  };
+  languages.addEventListener('change', updateLanguageSummary);
+  languages.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && languages.open) {
+      event.preventDefault();
+      languages.open = false;
+      languages.querySelector('summary').focus();
+    }
+  });
+  updateLanguageSummary();
+  if (values.email) {
+    const emailField = $('#profile-email');
+    emailField.insertAdjacentHTML('afterend', user.email_verified
+      ? '<small>Почта подтверждена</small>'
+      : '<div class="actions"><button type="button" class="secondary" id="verify-profile-email">Подтвердить почту</button></div>');
+    const verify = $('#verify-profile-email');
+    if (verify) verify.onclick = () => run(async () => {
+      if (emailField.value.trim().toLowerCase() !== user.email.toLowerCase()) {
+        throw Error('Сначала сохраните новый адрес почты');
+      }
+      verify.disabled = true;
+      try {
+        await api('email-verification', {});
+        toast('Письмо отправлено. Ссылка действует 24 часа.');
+      } finally {
+        verify.disabled = false;
+      }
+    });
+  }
+  const birthDate = $('#profile-birth-date');
+  birthDate?.addEventListener('input', () => {
+    $('#profile-birth-date-help').hidden = Boolean(birthDate.value);
+  });
   mountProfileGeography(user, $('#profile-geography'));
-  const details = JSON.parse(user.profile_media || '{}');
+  if (!isCoach) {
+    $('#content').insertAdjacentHTML('beforeend', '<section class="paper"><h2>Привязка соцсетей</h2><p class="muted">Подключение соцсетей пока недоступно.</p></section>');
+  }
   $('#content').insertAdjacentHTML('beforeend', '<section class="paper"><h2>Фото профиля</h2><div class="actions" id="profile-gallery"></div></section>');
   renderGalleryPreview($('#profile-gallery'), details, () => editTemplateMedia({title:user.name,details}, true), isCoach ? 3 : undefined);
+  if (!isCoach) {
+    $('#content').insertAdjacentHTML('beforeend', `
+      <section class="paper"><h2>Замеры тела</h2><p class="muted">Дневник замеров пока недоступен.</p></section>
+      <section class="paper"><h2>Управление учётной записью</h2>
+        <button type="button" class="secondary" id="profile-logout">Выйти</button>
+      </section>`);
+    $('#profile-logout').onclick = () => $('#logout').click();
+    $('#profile-header-logout').onclick = () => $('#logout').click();
+  }
   if (isCoach) {
     adminBreadcrumb('Мой профиль');
     renderCoachSocialAccounts();
@@ -750,12 +901,17 @@ function resultIcon(done) {
   return `<svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" role="img" aria-label="${label}"><title>${label}</title><path d="${path}"/></svg>`;
 }
 
-function clientAvatar(client) {
+function clientAvatar(client, activity) {
+  const status = activity === 'online'
+    ? '<span class="avatar-status status-online" role="img" aria-label="В сети"></span>'
+    : activity === 'recent'
+      ? '<span class="avatar-status status-away" role="img" aria-label="Был недавно"></span>'
+      : '';
   const cover = JSON.parse(client.profile_media || '{}').cover;
   const initials = (client.name || '').trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase();
   return `<span class="avatar avatar-lg${validMedia(cover) ? '' : ' theme-secondary'}">${validMedia(cover)
     ? `<img class="avatar-img" src="${esc(cover)}" alt="" loading="lazy">`
-    : esc(initials || '—')}</span>`;
+    : esc(initials || '—')}${status}</span>`;
 }
 
 function formatClientPhone(phone) {
@@ -907,11 +1063,17 @@ function renderAdminClients({clients, page:current, pages, offset}) {
   $('#content').innerHTML = `<h1>Клиенты</h1><div class="table-responsive clients-table">
     <table class="table table-striped align-top account-list-table"><thead><tr><th>№</th><th>Аватар</th><th>ФИО</th></tr></thead>
       <tbody>${clients.map((client,index) => `<tr class="${client.is_del ? 'deleted-account' : ''}">
-        <th scope="row">${offset+index+1}</th><td>${clientAvatar(client)}</td><td><a href="/?client=${client.id}">${accountListName(client)}</a>${accountListContacts(client)}</td>
+        <th scope="row">${offset+index+1}</th><td>${clientAvatar(client)}</td><td><a href="/?client=${client.id}">${accountListName(client)}</a>${accountListContacts(client)}${clientActivityLabel(client.activity)}</td>
       </tr>`).join('') || '<tr><td colspan="3">Клиентов пока нет.</td></tr>'}</tbody>
     </table></div>${clientPagination(current,pages)}`;
   bindClientPagination(adminClients);
   adminBreadcrumb('Клиенты');
+}
+
+function clientActivityLabel(status) {
+  if (status !== 'online' && status !== 'recent') return '';
+  return `<div><small><span aria-hidden="true">${status === 'online' ? '🟢' : '🟡'}</span>
+    ${status === 'online' ? 'В сети' : 'Был недавно'}</small></div>`;
 }
 
 function accountListName(account) {
@@ -1014,4 +1176,35 @@ function mountProfileGeography(user, container) {
       options.replaceChildren(...[...choices.keys()].map(label => new Option(label, label)));
     }), 250);
   };
+}
+
+
+async function showAuditLog(requested = 1) {
+  const content = $('#content');
+  content.innerHTML = '<h1>Протокол</h1><p role="status">Загрузка…</p>';
+  const pending = content.lastElementChild;
+  adminBreadcrumb('Протокол');
+  try {
+    const data = await api('audit-events?page=' + requested);
+    if (!pending.isConnected) return;
+    const roles = {user:'Клиент', coach:'Тренер', admin:'Администратор'};
+    const actions = {insert:'Добавление', update:'Редактирование', delete:'Удаление', login:'Вход',
+      logout:'Выход', upload:'Загрузка', email_confirm:'Подтверждение почты',
+      email_verification_sent:'Отправка ссылки'};
+    pending.outerHTML = `<div class="table-responsive clients-table">
+      <table class="table align-top" aria-label="История работы">
+        <thead><tr><th scope="col">Время (МСК)</th><th scope="col">Автор</th>
+          <th scope="col">Раздел</th><th scope="col">Действие</th><th scope="col">Описание</th></tr></thead>
+        <tbody>${data.events.map(event => `<tr>
+          <td>${esc(event.occurred_local)}</td>
+          <td>${esc(roles[event.actor_role])} · ID ${esc(event.actor_id)}</td>
+          <td>${esc(event.module)}<br><small>${esc(event.subsection)}</small></td>
+          <td>${esc(actions[event.action] || event.action)}${event.entity_id ? `<br><small>Объект ${esc(event.entity_id)}</small>` : ''}</td>
+          <td class="exercise-list-description" style="overflow-wrap:anywhere">${esc(event.description)}</td>
+        </tr>`).join('') || '<tr><td colspan="5">В протоколе пока нет записей.</td></tr>'}</tbody>
+      </table></div>${clientPagination(data.page, data.pages, 'протокола')}`;
+    bindClientPagination(showAuditLog);
+  } catch (error) {
+    if (pending.isConnected) pending.textContent = error.message;
+  }
 }

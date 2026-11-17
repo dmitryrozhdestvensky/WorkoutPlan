@@ -1,5 +1,6 @@
 import re, json, secrets, hashlib, os
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from datetime import date
 from pathlib import Path
 from http.cookies import SimpleCookie
 
@@ -83,6 +84,13 @@ def city_query(query):
     return [{'label':label, 'token':token} for label,token in results.items()]
 
 
+def audit_action(db, uid, role, module, subsection, action, entity, description):
+    db.execute("""
+        INSERT INTO audit_events(actor_id,actor_role,module,subsection,action,entity,description)
+        VALUES(?,?,?,?,?,?,?)
+    """, (uid, role, module, subsection, action, entity, description))
+
+
 def init():
     with connect() as connection:
         postgres_backend.initialize(connection)
@@ -152,7 +160,15 @@ class Handler(BaseHTTPRequestHandler):
         folder = DATA_DIR / 'uploads' / relative_folder
         folder.mkdir(parents=True, exist_ok=True)
         name = secrets.token_hex(16) + '.' + suffix
-        (folder / name).write_bytes(raw)
+        file = folder / name
+        try:
+            with connect() as db:
+                file.write_bytes(raw)
+                audit_action(db, uid, user['role'], 'Файлы', 'Загрузки', 'upload', 'file',
+                             f'Загружен файл {suffix.upper()}, {size} байт')
+        except Exception:
+            file.unlink(missing_ok=True)
+            raise
         return self.respond(200, {'url': f'/uploads/{relative_folder}/{name}'})
     def api(self,method):
         try:
@@ -164,11 +180,69 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path=='/api/login':
                     u=c.execute('SELECT * FROM users WHERE email=? AND is_del=0',(body.get('email'),)).fetchone()
                     if not u or not secrets.compare_digest(u['hash'],password(body.get('password',''),u['salt'])):return self.respond(401,{'error':'Неверная почта или пароль'})
+                    audit_action(c, u['id'], u['role'], 'Учётная запись', 'Сессия', 'login', 'session', 'Вход выполнен')
+                    c.commit()
                     t=secrets.token_hex(32);SESSIONS[t]=u['id'];return self.respond(200,{'ok':True},f'session={t}; HttpOnly; SameSite=Strict; Path=/')
+                if self.path == '/api/email-confirm' and method == 'POST':
+                    token = body.get('token')
+                    if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', token):
+                        return self.respond(400, {'error':'Ссылка недействительна или устарела'})
+                    digest = hashlib.sha256(token.encode()).hexdigest()
+                    account = c.execute("""
+                        SELECT u.id,u.role FROM users u JOIN email_verifications v ON v.user_id=u.id
+                        WHERE v.token_hash=? AND v.expires_at>CURRENT_TIMESTAMP AND u.is_del=0
+                        FOR UPDATE OF u
+                    """, (digest,)).fetchone()
+                    if not account or not c.execute("""
+                        DELETE FROM email_verifications WHERE user_id=? AND token_hash=?
+                        AND expires_at>CURRENT_TIMESTAMP RETURNING user_id
+                    """, (account['id'],digest)).fetchone():
+                        return self.respond(400, {'error':'Ссылка недействительна или устарела'})
+                    c.execute('UPDATE users SET email_verified_at=CURRENT_TIMESTAMP WHERE id=?', (account['id'],))
+                    audit_action(c, account['id'], account['role'], 'Мой профиль', 'Личные сведения',
+                                 'email_confirm', 'users', 'Почта подтверждена по одноразовой ссылке')
+                    c.commit()
+                    return self.respond(200, {'ok':True})
                 if not uid:return self.respond(401,{'error':'Войдите в аккаунт'})
                 u=c.execute('SELECT id,name,email,role,coach,surname,given_name,patronymic,phone,profile_media,coach_bio FROM users WHERE id=? AND is_del=0',(uid,)).fetchone()
                 if not u: return self.respond(401, {'error':'Войдите в аккаунт'})
                 role=u['role']
+                if role == 'user':
+                    c.execute('UPDATE users SET last_activity_at=clock_timestamp() WHERE id=?', (uid,))
+                if self.path == '/api/activity' and method == 'POST' and role == 'user':
+                    c.commit()
+                    return self.respond(200, {'ok':True})
+                if method == 'POST':
+                    c.execute("SELECT set_config('workoutplan.actor_id', ?, true), "
+                              "set_config('workoutplan.actor_role', ?, true), "
+                              "set_config('workoutplan.action_path', ?, true)",
+                              (str(uid), role, self.path))
+                if self.path == '/api/email-verification' and method == 'POST' and role in ('user','coach'):
+                    from email_verification import send_verification
+                    account = c.execute('SELECT email,email_verified_at FROM users WHERE id=? FOR UPDATE', (uid,)).fetchone()
+                    email = account['email']
+                    if not email or email.endswith('@login.invalid'):
+                        raise ValueError('Сначала сохраните адрес электронной почты')
+                    if account['email_verified_at']:
+                        raise ValueError('Почта уже подтверждена')
+                    if c.execute("SELECT 1 FROM email_verifications WHERE user_id=? AND expires_at>CURRENT_TIMESTAMP + INTERVAL '23 hours 59 minutes'", (uid,)).fetchone():
+                        return self.respond(429, {'error':'Повторно отправить письмо можно через минуту'})
+                    token = secrets.token_urlsafe(32)
+                    c.execute("""
+                        INSERT INTO email_verifications(user_id,token_hash,expires_at)
+                        VALUES(?,?,CURRENT_TIMESTAMP + INTERVAL '24 hours')
+                        ON CONFLICT(user_id) DO UPDATE SET token_hash=excluded.token_hash,expires_at=excluded.expires_at
+                    """, (uid,hashlib.sha256(token.encode()).hexdigest()))
+                    try:
+                        send_verification(email, token)
+                    except RuntimeError as error:
+                        c.rollback()
+                        return self.respond(503, {'error':str(error)})
+                    audit_action(c, uid, role, 'Мой профиль', 'Личные сведения',
+                                 'email_verification_sent', 'users', 'Отправлена ссылка подтверждения почты')
+                    c.commit()
+                    return self.respond(200, {'ok':True})
+
                 if method == 'GET' and self.path == '/api/geography':
                     query = self.query.get('q', [''])[0].strip()[:100]
                     try:
@@ -177,9 +251,16 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(503, {'error':'Подсказки городов временно недоступны'})
                 if self.path == '/api/state':
                     u.update(c.execute("""
-                        SELECT profile_location, communication_languages FROM users WHERE id=?
+                        SELECT profile_location, communication_languages, email_verified_at IS NOT NULL AS email_verified,
+                               birth_date::text AS birth_date,
+                               CASE WHEN last_activity_at >= CURRENT_TIMESTAMP - INTERVAL '10 minutes' THEN 'online'
+                                    WHEN last_activity_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes' THEN 'recent'
+                               END AS activity
+                        FROM users WHERE id=?
                     """, (uid,)).fetchone())
                 if self.path=='/api/logout':
+                    audit_action(c, uid, role, 'Учётная запись', 'Сессия', 'logout', 'session', 'Выход выполнен')
+                    c.commit()
                     SESSIONS.pop(token.value,None);return self.respond(200,{'ok':True},'session=; Max-Age=0; Path=/')
                 if self.path == '/api/account-restore' and method == 'POST' and role == 'admin':
                     c.execute("UPDATE users SET is_del=0 WHERE id=? AND role='coach' AND is_del=1", (int(body['id']),))
@@ -224,6 +305,20 @@ class Handler(BaseHTTPRequestHandler):
                             c.execute('INSERT INTO tags(group_id,name) VALUES(?,?)',(group,name))
                     c.commit()
                     return self.respond(200, {'ok':True})
+                if self.path == '/api/audit-events' and method == 'GET':
+                    if role != 'admin':
+                        return self.respond(403, {'error':'Нет доступа'})
+                    requested = max(1, int(self.query.get('page', ['1'])[0]))
+                    page_size = 30
+                    total = c.execute('SELECT count(*) FROM audit_events').fetchone()[0]
+                    pages = max(1, (total + page_size - 1) // page_size)
+                    current = min(requested, pages)
+                    events = [dict(row) for row in c.execute("""
+                        SELECT to_char(occurred_at AT TIME ZONE 'Europe/Moscow', 'DD.MM.YYYY HH24:MI:SS') AS occurred_local,
+                               actor_id, actor_role, module, subsection, action, entity_id, description
+                        FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?
+                    """, (page_size, (current - 1) * page_size))]
+                    return self.respond(200, dict(events=events, page=current, pages=pages))
                 if self.path == '/api/admin-dashboard' and method == 'GET':
                     if role != 'admin':
                         return self.respond(403, {'error':'Нет доступа'})
@@ -254,7 +349,9 @@ class Handler(BaseHTTPRequestHandler):
                     current = min(requested, pages)
                     offset = (current - 1) * page_size
                     clients = [dict(row) for row in c.execute(
-                        f'SELECT id,name,email,phone,surname,given_name,patronymic,profile_media,is_del '
+                        f'SELECT id,name,email,phone,surname,given_name,patronymic,profile_media,is_del, '
+                        "CASE WHEN is_del=0 AND last_activity_at>=CURRENT_TIMESTAMP - INTERVAL '10 minutes' THEN 'online' "
+                        "WHEN is_del=0 AND last_activity_at>=CURRENT_TIMESTAMP - INTERVAL '30 minutes' THEN 'recent' END AS activity "
                         f'FROM users WHERE {scope} ORDER BY id LIMIT ? OFFSET ?',
                         (*params, page_size, offset))]
                     if coaches:
@@ -395,7 +492,7 @@ class Handler(BaseHTTPRequestHandler):
                         if not c.execute("SELECT 1 FROM users WHERE id=? AND role='coach'",(target_uid,)).fetchone():
                             return self.respond(404, {'error':'Coach unavailable'})
                     parts = [body[key].strip() for key in ('surname','given_name','patronymic')]
-                    if not all(parts[:2]) or any(len(part)>50 for part in parts):
+                    if not parts[0] or (role != 'user' and not parts[1]) or any(len(part)>50 for part in parts):
                         raise ValueError('Invalid profile name')
                     target = c.execute('SELECT email,phone FROM users WHERE id=?',(target_uid,)).fetchone()
                     email = body.get('email', target['email']).strip().lower() or target['email']
@@ -408,6 +505,19 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(409, {'error':'Эта почта уже используется'})
                     c.execute('UPDATE users SET surname=?,given_name=?,patronymic=?,name=?,email=?,phone=? WHERE id=?',
                               (*parts, ' '.join(filter(None,parts)), email, phone, target_uid))
+                    if role == 'user' and 'birth_date' in body:
+                        value = body['birth_date']
+                        birthday = None
+                        if value != '':
+                            if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
+                                raise ValueError('Введите корректную дату рождения')
+                            try:
+                                birthday = date.fromisoformat(value)
+                            except ValueError:
+                                raise ValueError('Введите корректную дату рождения') from None
+                            if birthday > date.today():
+                                raise ValueError('Дата рождения не может быть в будущем')
+                        c.execute('UPDATE users SET birth_date=? WHERE id=?', (birthday, uid))
                     if 'communication_languages' in body:
                         languages = body['communication_languages']
                         if not isinstance(languages, list) or len(languages) > 9 or any(
@@ -567,7 +677,6 @@ class Handler(BaseHTTPRequestHandler):
                             raise ValueError('Шаблон недоступен')
                         body.update(title=template['title'], items=json.loads(template['items']), details=json.loads(template['details']))
                     if 'assignments' in body:
-                        from datetime import date
                         assignments = body['assignments']
                         if not body.get('template') or not assignments:
                             raise ValueError('Select clients')

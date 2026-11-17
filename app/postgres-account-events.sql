@@ -90,6 +90,7 @@ DROP TABLE IF EXISTS geo_cities;
 DROP TABLE IF EXISTS geo_countries;
 CREATE INDEX IF NOT EXISTS users_location_country_city_idx ON users(location_country,location_city);
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS communication_languages TEXT[] NOT NULL DEFAULT '{}';
 
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id);
@@ -108,3 +109,149 @@ ALTER TABLE exercises ALTER COLUMN moderation_status SET DEFAULT 'approved',
 ALTER TABLE exercises DROP CONSTRAINT IF EXISTS exercises_moderation_status_check;
 ALTER TABLE exercises ADD CONSTRAINT exercises_moderation_status_check
     CHECK (moderation_status IN ('draft', 'pending', 'approved', 'rejected'));
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS email_verifications (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE OR REPLACE FUNCTION workoutplan_reset_email_verification() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.email IS DISTINCT FROM OLD.email THEN
+        NEW.email_verified_at := NULL;
+        DELETE FROM email_verifications WHERE user_id=OLD.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS workoutplan_reset_email_verification ON users;
+CREATE TRIGGER workoutplan_reset_email_verification BEFORE UPDATE OF email ON users
+FOR EACH ROW EXECUTE FUNCTION workoutplan_reset_email_verification();
+
+CREATE TABLE IF NOT EXISTS audit_events (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    actor_id INTEGER NOT NULL,
+    actor_role TEXT NOT NULL CHECK (actor_role IN ('user', 'coach', 'admin')),
+    module TEXT NOT NULL,
+    subsection TEXT NOT NULL,
+    action TEXT NOT NULL,
+    entity TEXT NOT NULL,
+    entity_id TEXT,
+    description TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_events_time_idx ON audit_events(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS audit_events_role_time_idx ON audit_events(actor_role, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS audit_events_module_time_idx ON audit_events(module, subsection, occurred_at DESC);
+
+CREATE OR REPLACE FUNCTION workoutplan_audit_change() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    actor TEXT := nullif(current_setting('workoutplan.actor_id', true), '');
+    actor_role TEXT := current_setting('workoutplan.actor_role', true);
+    route TEXT := current_setting('workoutplan.action_path', true);
+    section TEXT := TG_ARGV[0];
+    subsection TEXT := 'Изменения';
+    previous JSONB := '{}';
+    current_row JSONB := '{}';
+    field TEXT;
+    label TEXT;
+    change_text TEXT := '';
+    event_action TEXT := lower(TG_OP);
+BEGIN
+    IF actor IS NULL THEN RETURN NULL; END IF;
+    IF TG_OP <> 'INSERT' THEN previous := to_jsonb(OLD); END IF;
+    IF TG_OP <> 'DELETE' THEN current_row := to_jsonb(NEW); END IF;
+    IF route = '/api/coach-profile' THEN
+        section := CASE WHEN actor_role = 'admin' THEN 'Тренеры' ELSE 'Мой профиль' END;
+        subsection := 'Личные сведения';
+    ELSIF route = '/api/profile-media' THEN
+        section := CASE WHEN actor_role = 'admin' THEN 'Тренеры' ELSE 'Мой профиль' END;
+        subsection := 'Фото профиля';
+    ELSIF route IN ('/api/client-create', '/api/client-edit', '/api/client-link') THEN
+        section := 'Клиенты';
+        subsection := 'Карточка клиента';
+    ELSIF route IN ('/api/coach-create', '/api/trainers') THEN
+        section := 'Тренеры';
+        subsection := 'Профиль тренера';
+    ELSIF route = '/api/coach-bio' THEN
+        section := CASE WHEN actor_role = 'admin' THEN 'Тренеры' ELSE 'Мой профиль' END;
+        subsection := 'Сведения о тренере';
+    ELSIF route = '/api/template-media' THEN
+        section := 'Мои тренировки';
+        subsection := 'Шаблоны';
+    ELSIF TG_TABLE_NAME = 'exercises' AND previous->'moderation_status' IS DISTINCT FROM current_row->'moderation_status'
+          AND TG_OP = 'UPDATE' THEN
+        subsection := 'Модерация';
+    END IF;
+
+    FOREACH field IN ARRAY string_to_array(TG_ARGV[1], ',') LOOP
+        IF previous->field IS DISTINCT FROM current_row->field THEN
+            label := CASE field
+                WHEN 'email' THEN 'почта'
+                WHEN 'phone' THEN 'телефон'
+                WHEN 'birth_date' THEN 'дата рождения'
+                WHEN 'surname' THEN 'фамилия'
+                WHEN 'given_name' THEN 'имя'
+                WHEN 'patronymic' THEN 'отчество'
+                WHEN 'communication_languages' THEN 'языки общения'
+                WHEN 'name' THEN 'название'
+                WHEN 'title' THEN 'название'
+                WHEN 'moderation_status' THEN 'статус модерации'
+                ELSE field END;
+            change_text := concat_ws(E'\n', nullif(change_text, ''),
+                CASE WHEN field IN ('profile_media','gallery','media','details','items','payload','coach_bio','instruction')
+                    THEN format('Изменено: %s', label)
+                    ELSE format('Поле «%s»: %s → %s', label,
+                        coalesce(previous->>field, '—'), coalesce(current_row->>field, '—'))
+                END);
+        END IF;
+    END LOOP;
+    IF TG_OP = 'UPDATE' AND change_text = '' THEN RETURN NULL; END IF;
+
+    IF TG_TABLE_NAME = 'tags' AND TG_OP = 'UPDATE'
+        AND previous->>'archived_at' IS NULL AND current_row->>'archived_at' IS NOT NULL THEN
+        event_action := 'delete';
+        change_text := 'Удаление записи';
+    END IF;
+
+    INSERT INTO audit_events(actor_id, actor_role, module, subsection, action, entity, entity_id, description)
+    VALUES (actor::integer, actor_role, section, subsection, event_action, TG_TABLE_NAME,
+        coalesce(current_row->>'id', previous->>'id', current_row->>'exercise_id', previous->>'exercise_id',
+                 current_row->>'workout', previous->>'workout'),
+        coalesce(nullif(change_text, ''), CASE TG_OP WHEN 'INSERT' THEN 'Запись создана' ELSE 'Запись удалена' END));
+    RETURN NULL;
+END;
+$$;
+
+DO $$
+DECLARE
+    config RECORD;
+BEGIN
+    FOR config IN SELECT * FROM (VALUES
+        ('users', 'Учётные записи', 'email,phone,birth_date,surname,given_name,patronymic,communication_languages,location_country,location_city,profile_media,coach_bio,coach,is_del'),
+        ('exercises', 'Упражнения', 'name,instruction,media,gallery,moderation_status'),
+        ('exercise_tags', 'Упражнения', 'tag_id'),
+        ('workouts', 'Тренировки', 'title,client,coach,items,details'),
+        ('results', 'Результаты тренировок', 'payload'),
+        ('coach_programs', 'Мои программы', 'title,duration,items'),
+        ('tags', 'Справочники', 'name,archived_at')
+    ) AS settings(table_name, module, fields)
+    LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS workoutplan_audit ON %I', config.table_name);
+        EXECUTE format('CREATE TRIGGER workoutplan_audit AFTER INSERT OR UPDATE OR DELETE ON %I
+                        FOR EACH ROW EXECUTE FUNCTION workoutplan_audit_change(%L, %L)',
+                        config.table_name, config.module, config.fields);
+    END LOOP;
+END;
+$$;
+
+
+UPDATE audit_events
+SET action = 'delete', description = 'Удаление записи'
+WHERE entity = 'tags' AND action = 'update'
+    AND starts_with(description, 'Поле «archived_at»: — → ');
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ;

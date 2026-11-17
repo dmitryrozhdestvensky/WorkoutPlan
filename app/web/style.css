@@ -313,3 +313,80 @@
 .exercise-moderation-options .theme-warning { accent-color: #b77900; }
 .exercise-moderation-options .theme-success { accent-color: #00894a; }
 .exercise-moderation-options .theme-danger { accent-color: #c5283d; }
+
+.client-profile-summary { padding: 16px; }
+.client-profile-identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.client-profile-identity .avatar {
+  display: inline-grid;
+  place-items: center;
+  position: relative;
+  border-radius: 50%;
+  background: #e2e8e0;
+  font-weight: 600;
+}
+.client-profile-identity .avatar-lg { width: 48px; height: 48px; }
+.client-profile-identity .avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+.client-profile-identity .avatar-status {
+  position: absolute;
+  inset: auto 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+}
+.client-profile-identity .status-online { background: #238636; }
+.client-profile-identity .status-away { background: #c58800; }
+.client-profile-contact { overflow-wrap: anywhere; }
+.client-profile-contact h2 { margin: 0; font-size: 1rem; font-weight: 500; letter-spacing: normal; }
+.client-profile-contact p { margin: 0; font-size: .875rem; }
+#profile-header-logout { align-self: start; }
+.client-profile-completion { margin-top: 22px; }
+.client-profile-progress-label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.client-profile-progress-label h3 { margin: 0; font-size: 1rem; }
+.client-profile-completion .theme-success { --profile-progress-color: #238636; }
+.client-profile-completion .theme-primary { --profile-progress-color: #0d6efd; }
+.client-profile-completion .theme-warning { --profile-progress-color: #b88200; }
+.client-profile-completion .theme-secondary { --profile-progress-color: #687078; }
+.client-profile-completion progress {
+  appearance: none;
+  display: block;
+  height: 9px;
+  margin: 16px 0 0;
+  border: 0;
+  border-radius: 99px;
+  overflow: hidden;
+  background: #ebeae7;
+  color: var(--profile-progress-color, #687078);
+}
+.client-profile-completion progress::-webkit-progress-bar { background: #ebeae7; }
+.client-profile-completion progress::-webkit-progress-value { background: var(--profile-progress-color, #687078); border-radius: 99px; }
+.client-profile-completion progress::-moz-progress-bar { background: var(--profile-progress-color, #687078); border-radius: 99px; }
+.client-profile-completion p { margin: 20px 0 0; }
+
+.profile-languages { position: relative; }
+.profile-languages summary {
+  padding: .65rem .75rem;
+  border: 1px solid #b9c6b9;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.profile-languages summary::marker { color: #28533f; }
+.profile-languages .menu {
+  padding: .5rem .75rem;
+  border: 1px solid #b9c6b9;
+  border-radius: 6px;
+  margin-top: .25rem;
+  background: #fff;
+}
