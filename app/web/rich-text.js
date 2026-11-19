@@ -70,3 +70,22 @@ function mountInstructionEditor(textarea, fields, readOnly) {
     }
   };
 }
+
+function firstInstructionParagraph(value, format = 'text') {
+  if (format !== 'html') return String(value || '').split(/\r?\n/).map(line => line.trim()).find(Boolean) || '';
+  const container = document.createElement('div');
+  container.innerHTML = instructionHTML(value, format);
+  const paragraphs = [];
+  let current = '';
+  const flush = () => { const text = current.replace(/\s+/g,' ').trim(); if(text)paragraphs.push(text); current=''; };
+  const visit = node => {
+    if(node.nodeType===3) { current += node.textContent; return; }
+    const block = ['P','H2','H3','LI','UL','OL','BLOCKQUOTE','BR'].includes(node.nodeName);
+    if(block)flush();
+    for(const child of node.childNodes)visit(child);
+    if(block)flush();
+  };
+  for(const child of container.childNodes)visit(child);
+  flush();
+  return paragraphs[0] || '';
+}

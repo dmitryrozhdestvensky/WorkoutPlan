@@ -13,6 +13,7 @@ if not DATABASE_URL:
 
 import postgres_backend
 from rich_text import validate_instruction
+from registration_stats import account_registration_stats
 
 INTEGRITY_ERRORS = (postgres_backend.psycopg.IntegrityError,)
 
@@ -144,7 +145,7 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copyfileobj(source, self.wfile)
             return
         path=ROOT/'web'/('index.html' if self.path=='/' else self.path.lstrip('/'))
-        vendor_asset = self.path in ('/vendor/quill/quill.js', '/vendor/quill/quill.snow.css')
+        vendor_asset = self.path in ('/vendor/quill/quill.js', '/vendor/quill/quill.snow.css', '/vendor/chartjs/chart.umd.min.js')
         if (path.parent != ROOT/'web' and not vendor_asset) or not path.is_file():self.send_error(404);return
         self.send_response(200);self.send_header('Content-Type',{'html':'text/html; charset=utf-8','css':'text/css','js':'text/javascript; charset=utf-8'}.get(path.suffix[1:],'text/plain'));self.end_headers();self.wfile.write(path.read_bytes())
     def do_POST(self):
@@ -450,6 +451,11 @@ class Handler(BaseHTTPRequestHandler):
                         FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?
                     """, (page_size, (current - 1) * page_size))]
                     return self.respond(200, dict(events=events, page=current, pages=pages))
+                if self.path in ('/api/client-registration-stats', '/api/coach-registration-stats') and method == 'GET':
+                    if role != 'admin':
+                        return self.respond(403, {'error':'Нет доступа'})
+                    return self.respond(200, account_registration_stats(c, self.query.get('period', ['day'])[0],
+                        'coach' if self.path == '/api/coach-registration-stats' else 'user'))
                 if self.path == '/api/admin-dashboard' and method == 'GET':
                     if role != 'admin':
                         return self.respond(403, {'error':'Нет доступа'})
@@ -490,18 +496,56 @@ class Handler(BaseHTTPRequestHandler):
                         invited_by = referral['owner_id'] if referral else None
                     order = 'CASE WHEN id=? THEN 0 ELSE 1 END, id' if invited_by else 'id'
                     order_params = (invited_by,) if invited_by else ()
+                    registration_fields = ''
+                    if role == 'admin':
+                        name_key = "replace(lower(translate(coalesce(nullif(btrim(surname),''),name,''), 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя')), 'ё', 'е')"
+                        given_key = "replace(lower(translate(coalesce(given_name,''), 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя')), 'ё', 'е')"
+                        patronymic_key = "replace(lower(translate(coalesce(patronymic,''), 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя')), 'ё', 'е')"
+                        orders = {
+                            'registered_desc':'registered_at DESC NULLS LAST, id DESC',
+                            'registered_asc':'registered_at ASC NULLS LAST, id ASC',
+                            'name_asc':f'{name_key} ASC, {given_key} ASC, {patronymic_key} ASC, id ASC',
+                            'name_desc':f'{name_key} DESC, {given_key} DESC, {patronymic_key} DESC, id DESC'
+                        }
+                        sort = self.query.get('sort', ['registered_desc'])[0]
+                        if sort not in orders:
+                            raise ValueError('Неверный порядок сортировки')
+                        order = orders[sort]
+                        registration_fields = ("registered_at::text AS registered_at, "
+                            "to_char(registered_at AT TIME ZONE 'Europe/Moscow', 'DD.MM.YYYY HH24:MI') AS registered_local, ")
+
+                    if role == 'admin' or (coaches and role == 'user'):
+                        search = self.query.get('q', [''])[0]
+                        if len(search) > 200 or any(ord(char) < 32 and not char.isspace() for char in search):
+                            raise ValueError('Поиск по ФИО: не более 200 символов')
+                        search = ' '.join(search.split())
+                        if search and len(search) < 3:
+                            raise ValueError('Введите не менее 3 символов ФИО')
+                        for token in search.lower().replace('ё','е').split():
+                            scope += " AND strpos(replace(lower(translate(concat_ws(' ',surname,given_name,patronymic,name), 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя')), 'ё', 'е'), ?) > 0"
+                            params += (token,)
+
                     total = c.execute(f'SELECT count(*) FROM users WHERE {scope}', params).fetchone()[0]
                     pages = max(1, (total + page_size - 1) // page_size)
                     current = min(requested, pages)
                     offset = (current - 1) * page_size
                     clients = [dict(row) for row in c.execute(
-                        f'SELECT id,name,email,phone,surname,given_name,patronymic,profile_media,is_del, '
+                        f'SELECT {registration_fields}id,name,email,phone,surname,given_name,patronymic,profile_media,is_del, '
                         "CASE WHEN is_del=0 AND last_activity_at>=CURRENT_TIMESTAMP - INTERVAL '10 minutes' THEN 'online' "
                         "WHEN is_del=0 AND last_activity_at>=CURRENT_TIMESTAMP - INTERVAL '30 minutes' THEN 'recent' END AS activity "
                         f'FROM users WHERE {scope} ORDER BY {order} LIMIT ? OFFSET ?',
                         (*params, *order_params, page_size, offset))]
                     if coaches:
+                        content_counts = {row['id']:dict(row) for row in c.execute("""
+                            SELECT u.id,
+                                (SELECT count(*) FROM coach_programs p WHERE p.coach_id=u.id) AS program_count,
+                                (SELECT count(*) FROM workouts w WHERE w.coach=u.id AND w.client IS NULL) AS workout_count
+                            FROM users u WHERE u.id=ANY(?)
+                        """, ([coach['id'] for coach in clients],))}
                         for coach in clients:
+                            counts = content_counts[coach['id']]
+                            coach['program_count'] = counts['program_count']
+                            coach['workout_count'] = counts['workout_count']
                             coach['invited_you'] = coach['id'] == invited_by
                             coach['client_count'] = c.execute(
                                 "SELECT count(*) FROM users WHERE role='user' AND is_del=0 AND coach=?",
@@ -511,7 +555,7 @@ class Handler(BaseHTTPRequestHandler):
                             client['workouts'] = [row['title'] for row in c.execute(
                                 'SELECT title FROM workouts WHERE coach=? AND client=? ORDER BY id',
                                 (uid, client['id']))]
-                    return self.respond(200, dict(clients=clients, page=current, pages=pages, offset=offset))
+                    return self.respond(200, dict(clients=clients, page=current, pages=pages, offset=offset, total=total))
                 if self.path == '/api/exercise-stats' and method == 'GET':
                     if role not in ('admin', 'coach'):
                         return self.respond(403, {'error':'Нет доступа'})

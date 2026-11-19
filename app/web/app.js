@@ -197,7 +197,7 @@ function library() {
           <td>${admin ? `<button type="button" class="exercise-edit-link">${esc(exercise.name)}</button>`
              : showStatus && ['draft', 'pending'].includes(exercise.moderation_status)
               ? `<a href="#exercise-${exercise.id}" data-edit-own-exercise="${exercise.id}"><strong>${esc(exercise.name)}</strong></a>`
-              : `<strong>${esc(exercise.name)}</strong>`}${exerciseListDetails(exercise, admin)}${showStatus ? exerciseModerationStatus(exercise) : ''}
+              : `<strong>${esc(exercise.name)}</strong>`}${exerciseListDetails(exercise)}${showStatus ? exerciseModerationStatus(exercise) : ''}
             ${admin && exercise.moderation_status === 'pending' && exercise.coach_name
               ? `<p class="exercise-list-description">Тренер: <a href="/?coach=${exercise.created_by}">${esc(exercise.coach_name)}</a></p>`
               : ''}</td>
@@ -265,18 +265,15 @@ function exerciseModerationStatus(exercise) {
       data-edit-own-exercise="${exercise.id}">Редактировать</button>` : ''}</div>`;
 }
 
-function exerciseListDetails(exercise, hideInstruction = false) {
+function exerciseListDetails(exercise) {
   const tags = exercise.tag_names || [];
-  if (hideInstruction) {
     const description = document.createElement('div');
     description.innerHTML = instructionHTML(exercise.instruction, exercise.instruction_format);
     const hasDescription = Boolean(description.textContent.replace(/[\u200b-\u200d\ufeff]/g, '').trim());
-    return `<div class="exercise-list-tags exercise-list-tags-spaced"><span class="tag description-status theme-${hasDescription ? 'success' : 'warning'}"><svg class="bi bi-file-text" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false"><path d="M5 4a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1zm-.5 2.5A.5.5 0 0 1 5 6h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5M5 8a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1zm0 2a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1z" />
+    const preview = firstInstructionParagraph(exercise.instruction, exercise.instruction_format);
+    return `${preview ? `<p class="exercise-list-description">${esc(preview)}</p>` : ''}<div class="exercise-list-tags exercise-list-tags-spaced"><span class="tag description-status theme-${hasDescription ? 'success' : 'warning'}"><svg class="bi bi-file-text" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false"><path d="M5 4a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1zm-.5 2.5A.5.5 0 0 1 5 6h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5M5 8a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1zm0 2a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1z" />
   <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2zm10-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1" />
 </svg><span>${hasDescription ? 'есть описание' : 'нет описания'}</span></span>${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>`;
-  }
-  return `<div class="exercise-list-description rich-text-content">${instructionHTML(exercise.instruction || '—',exercise.instruction_format)}</div>
-    ${tags.length ? `<div class="exercise-list-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}`;
 }
 
 function exerciseThumbnail(exercise) {
@@ -308,13 +305,34 @@ function showExercisePhoto(trigger) {
   dialog.showModal();
 }
 
+let adminCoachSort = 'registered_desc', adminCoachSearch = '';
+let clientCoachSearch = '';
 function trainers(requested = 1) {
-  return renderClientPage('trainers', requested, renderTrainers, 'coaches');
+  return renderClientPage('trainers', requested, renderTrainers, 'coaches', state.user.role==='admin' ? {sort:adminCoachSort,q:adminCoachSearch} : {q:clientCoachSearch});
 }
 
-function renderTrainers({clients: coaches, page: current, pages, offset}) {if(state.user.role==='user')return renderClientTrainers({coaches,current,pages,offset});$('#content').innerHTML=`<div class="top"><h1>Тренеры</h1><button id="add-coach">Добавить тренера</button></div><p class="muted">Доступ к конструктору выдаёт администратор.</p><div class="table-responsive table-card clients-table"><table class="table table-striped align-top account-list-table" aria-label="Тренеры"><thead><tr><th scope="col">№</th><th scope="col">Аватар</th><th scope="col">ФИО</th><th scope="col">Клиентов</th></tr></thead><tbody>${coaches.map((user,index)=>`<tr class="${user.is_del ? 'deleted-account' : ''}"><th scope="row">${offset+index+1}</th><td>${clientAvatar(user)}</td><td><a href="/?coach=${user.id}">${accountListName(user)}</a>${accountListContacts(user)}</td><td>${user.client_count}</td></tr>`).join('') || '<tr><td colspan="4">Тренеры пока не добавлены.</td></tr>'}</tbody></table></div>${clientPagination(current,pages, 'тренеров')}`;bindClientPagination(trainers);adminBreadcrumb('Тренеры');$('#add-coach').onclick=()=>showClientCreate(null,true);}
-function renderClientTrainers({coaches, current, pages, offset}) {
-  $('#content').innerHTML = `<h1>Тренеры</h1><div class="table-responsive table-card clients-table"><table class="table table-striped align-top account-list-table" aria-label="Тренеры"><thead><tr><th scope="col">№</th><th scope="col">Аватар</th><th scope="col">ФИО</th><th scope="col">Клиентов</th></tr></thead><tbody>${coaches.map((user,index) => `<tr><th scope="row">${offset+index+1}</th><td>${clientAvatar(user)}</td><td>${accountListName(user)}${accountListContacts(user)}${user.invited_you ? '<p><span class="tag">Пригласил вас</span></p>' : ''}</td><td>${user.client_count}</td></tr>`).join('') || '<tr><td colspan="4">Тренеры пока не добавлены.</td></tr>'}</tbody></table></div>${clientPagination(current,pages,'тренеров')}`;
+function renderTrainers(data) {
+  if(state.user.role==='user')return renderClientTrainers({coaches:data.clients,current:data.page,pages:data.pages,offset:data.offset,total:data.total});
+  renderAdminAccounts(data, true);
+}
+
+function renderClientTrainers({coaches, current, pages, offset, total}) {
+  $('#content').innerHTML = `<h1>Тренеры</h1>
+    <form id="client-coach-search" class="mb-3">
+      <label for="client-coach-query" class="form-label">Поиск по ФИО</label>
+      <div class="admin-client-search-controls">
+        <input id="client-coach-query" name="q" type="search" class="form-control" minlength="3" maxlength="200" value="${esc(clientCoachSearch)}" placeholder="Фамилия, имя или отчество" aria-describedby="client-coach-search-help">
+        <button type="submit">Найти</button><button type="button" class="secondary" id="client-coach-search-reset" ${clientCoachSearch?'':'hidden'}>Сбросить</button>
+      </div><small id="client-coach-search-help">Введите не менее 3 символов. Можно указать часть ФИО.</small>
+    </form>
+    ${clientCoachSearch ? `<p role="status">Найдено тренеров: <strong>${new Intl.NumberFormat('ru-RU').format(total)}</strong></p>` : ''}
+    <div class="table-responsive table-card clients-table"><table class="table table-striped align-top account-list-table client-coach-table" aria-label="Тренеры"><thead><tr><th scope="col">№</th><th scope="col">Аватар</th><th scope="col">ФИО</th><th scope="col">Клиентов</th><th scope="col">Программ / тренировок</th></tr></thead><tbody>${coaches.map((user,index) => `<tr><th scope="row">${offset+index+1}</th><td>${clientAvatar(user)}</td><td>${accountListName(user)}${accountListContacts(user)}${user.invited_you ? '<p><span class="tag">Пригласил вас</span></p>' : ''}</td><td>${user.client_count}</td><td>${user.program_count} / ${user.workout_count}</td></tr>`).join('') || (clientCoachSearch?'<tr><td colspan="5">По вашему запросу тренеры не найдены.</td></tr>':'<tr><td colspan="5">Тренеры пока не добавлены.</td></tr>')}</tbody></table></div>${clientPagination(current,pages,'тренеров')}`;
+  $('#client-coach-search').onsubmit = event => {
+    event.preventDefault();
+    clientCoachSearch = $('#client-coach-query').value.trim().replace(/\s+/g,' ');
+    trainers(1);
+  };
+  $('#client-coach-search-reset').onclick = () => { clientCoachSearch=''; trainers(1); };
   bindClientPagination(trainers);
   adminBreadcrumb('Тренеры');
 }
@@ -1204,19 +1222,60 @@ function renderCoachDelete(coach) {
   });
 }
 
+let adminClientSort = 'registered_desc';
+let adminClientSearch = '';
 function adminClients(requested = 1) {
-  return renderClientPage('admin-clients', requested, renderAdminClients);
+  return renderClientPage('admin-clients', requested, renderAdminClients, 'clients', {sort:adminClientSort, q:adminClientSearch});
 }
 
-function renderAdminClients({clients, page:current, pages, offset}) {
-  $('#content').innerHTML = `<h1>Клиенты</h1><div class="table-responsive clients-table">
-    <table class="table table-striped align-top account-list-table"><thead><tr><th>№</th><th>Аватар</th><th>ФИО</th></tr></thead>
-      <tbody>${clients.map((client,index) => `<tr class="${client.is_del ? 'deleted-account' : ''}">
-        <th scope="row">${offset+index+1}</th><td>${clientAvatar(client)}</td><td><a href="/?client=${client.id}">${accountListName(client)}</a>${accountListContacts(client)}${clientActivityLabel(client.activity)}</td>
-      </tr>`).join('') || '<tr><td colspan="3">Клиентов пока нет.</td></tr>'}</tbody>
-    </table></div>${clientPagination(current,pages)}`;
-  bindClientPagination(adminClients);
-  adminBreadcrumb('Клиенты');
+function renderAdminClients(data) { renderAdminAccounts(data, false); }
+
+function renderAdminAccounts({clients, page:current, pages, offset, total}, coaches) {
+  const title = coaches ? 'Тренеры' : 'Клиенты';
+  const prefix = coaches ? 'admin-coach' : 'admin-client';
+  const sort = coaches ? adminCoachSort : adminClientSort;
+  const search = coaches ? adminCoachSearch : adminClientSearch;
+  const openPage = coaches ? trainers : adminClients;
+  $('#content').innerHTML = `<div class="top"><h1>${title}</h1>${coaches ? '<button id="add-coach">Добавить тренера</button>' : ''}</div>
+    <section class="paper registration-dashboard" id="account-registration-dashboard" aria-labelledby="registration-chart-title"></section>
+    <div class="mb-3 admin-client-sort"><label for="${prefix}-sort" class="form-label">Сортировка</label>
+      <select id="${prefix}-sort" class="form-select">${[
+        ['registered_desc','Дата регистрации — сначала новые'],['registered_asc','Дата регистрации — сначала старые'],
+        ['name_asc','ФИО — А–Я'],['name_desc','ФИО — Я–А']
+      ].map(([value,label]) => `<option value="${value}" ${sort===value?'selected':''}>${label}</option>`).join('')}</select></div>
+    <form id="${prefix}-search" class="mb-3">
+      <label for="${prefix}-query" class="form-label">Поиск по ФИО</label>
+      <div class="admin-client-search-controls">
+        <input id="${prefix}-query" name="q" type="search" class="form-control" minlength="3" maxlength="200" value="${esc(search)}" placeholder="Фамилия, имя или отчество" aria-describedby="${prefix}-search-help">
+        <button type="submit">Найти</button><button type="button" class="secondary" id="${prefix}-search-reset" ${search?'':'hidden'}>Сбросить</button>
+      </div><small id="${prefix}-search-help">Введите не менее 3 символов. Можно указать часть ФИО.</small>
+    </form>
+    ${search ? `<p role="status">Найдено ${coaches?'тренеров':'клиентов'}: <strong>${new Intl.NumberFormat('ru-RU').format(total)}</strong></p>` : ''}
+    <div class="table-responsive clients-table">
+    <table class="table table-striped align-top account-list-table ${coaches?'admin-coach-table':'admin-client-table'}" aria-label="${title}"><thead><tr><th scope="col">№</th><th scope="col">Аватар</th><th scope="col">ФИО</th>${coaches?'<th scope="col">Клиентов</th><th scope="col">Программ / тренировок</th>':''}<th scope="col">Дата регистрации</th></tr></thead>
+      <tbody>${clients.map((account,index) => `<tr class="${account.is_del ? 'deleted-account' : ''}">
+        <th scope="row">${offset+index+1}</th><td>${clientAvatar(account)}</td><td><a href="/?${coaches?'coach':'client'}=${account.id}">${accountListName(account)}</a>${accountListContacts(account)}${coaches?'':clientActivityLabel(account.activity)}</td>
+        ${coaches?`<td>${account.client_count}</td><td>${account.program_count} / ${account.workout_count}</td>`:''}<td>${esc(account.registered_local || '—')}</td>
+      </tr>`).join('') || `<tr><td colspan="${coaches?6:4}">${search?'По вашему запросу ничего не найдено.':coaches?'Тренеры пока не добавлены.':'Клиентов пока нет.'}</td></tr>`}</tbody>
+    </table></div>${clientPagination(current,pages,coaches?'тренеров':'клиентов')}`;
+  mountRegistrationDashboard($('#account-registration-dashboard'), coaches?'coaches':'clients');
+  $(`#${prefix}-sort`).onchange = event => {
+    if(coaches)adminCoachSort=event.target.value;else adminClientSort=event.target.value;
+    openPage(1);
+  };
+  $(`#${prefix}-search`).onsubmit = event => {
+    event.preventDefault();
+    const value = $(`#${prefix}-query`).value.trim().replace(/\s+/g,' ');
+    if(coaches)adminCoachSearch=value;else adminClientSearch=value;
+    openPage(1);
+  };
+  $(`#${prefix}-search-reset`).onclick = () => {
+    if(coaches)adminCoachSearch='';else adminClientSearch='';
+    openPage(1);
+  };
+  if(coaches)$('#add-coach').onclick=()=>showClientCreate(null,true);
+  bindClientPagination(openPage);
+  adminBreadcrumb(title);
 }
 
 function clientActivityLabel(status) {
@@ -1237,14 +1296,15 @@ function accountListContacts(account) {
   return contacts.length ? `<div><small>${esc(contacts.join(', '))}</small></div>` : '';
 }
 
-async function renderClientPage(view, requested, draw, endpoint = 'clients') {
+async function renderClientPage(view, requested, draw, endpoint = 'clients', filters = {}) {
   const content = $('#content');
   const pending = document.createElement('p');
   pending.textContent = 'Загрузка…';
   pending.setAttribute('role', 'status');
   content.replaceChildren(pending);
   try {
-    const data = await api(endpoint + '?page=' + requested);
+    const query = new URLSearchParams({...filters, page:requested});
+    const data = await api(endpoint + '?' + query.toString());
     if (page === view && pending.isConnected) draw(data);
   } catch (error) {
     if (pending.isConnected) pending.textContent = error.message;

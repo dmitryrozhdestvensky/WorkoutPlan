@@ -373,3 +373,7 @@ CREATE TRIGGER workoutplan_award_measurement_stars AFTER INSERT ON body_measurem
 FOR EACH ROW EXECUTE FUNCTION workoutplan_award_measurement_stars();
 
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS instruction_format TEXT NOT NULL DEFAULT 'text' CHECK (instruction_format IN ('text','html'));
+
+CREATE INDEX IF NOT EXISTS users_client_registered_idx ON users(registered_at) WHERE role='user';
+
+CREATE INDEX IF NOT EXISTS users_coach_registered_idx ON users(registered_at) WHERE role='coach';

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ru" data-type="software" data-radius="soft" data-buttons="solid" data-motion>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="page-type" content="software">
+<meta name="site-kind" content="software">
+<meta name="theme-color" content="#12251d">
+<meta name="description" content="ПланТренировок — веб-дневник для клиента и тренера. Назначайте тренировки, записывайте подходы и следите за замерами.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ПланТренировок — дневник клиента и тренера">
+<meta property="og:description" content="От назначения тренировки до сохранённого подхода.">
+<title>ПланТренировок — дневник клиента и тренера</title>
+<link rel="stylesheet" href="landing-motion.css">
+<link rel="stylesheet" href="landing.css">
+<script>document.documentElement.classList.add('m-enter');setTimeout(()=>document.documentElement.classList.add('m-enter-done'),700)</script>
+</head>
+<body>
+<a class="skip-link" href="#main">К основному содержанию</a>
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="brand" href="#main"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>ПланТренировок</a>
+    <nav aria-label="Разделы лендинга"><a href="#client">Клиентам</a><a href="#coach">Тренерам</a></nav>
+    <a class="sign-in" href="/">Начать тренироваться</a>
+  </div>
+</header>
+<main id="main" tabindex="-1">
+  <!-- software: centered product preview, paper and forest palette from DESIGN.md -->
+  <section class="hero" aria-labelledby="hero-title" data-enter>
+    <div class="wrap hero-wrap">
+      <div class="hero-copy">
+        <h1 id="hero-title">Дневник тренировок<br> для клиента и тренера</h1>
+        <p>Тренер назначает занятия, клиент записывает подходы. План, результаты и замеры тела хранятся в одном месте.</p>
+        <a class="button" href="/?register=user">Создать аккаунт <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="app-frame" data-visual>
+        <div class="app-bar"><span><span class="window-dot"></span> ПланТренировок</span><span>Демо тренировки</span></div>
+        <div class="app-body">
+          <div class="app-sidebar"><strong>Личный дневник</strong><span class="current">План тренировок</span><span>История занятий</span><span>Замеры тела</span></div>
+          <div class="app-content">
+            <p class="mock-label">Тренировка · Силовая</p>
+            <p class="mock-exercise"><strong>Жим гантелей лёжа</strong></p>
+            <div class="set-table">
+              <table>
+                <thead><tr><th scope="col">Подход</th><th scope="col">Вес, кг</th><th scope="col">Повторения</th><th scope="col">Готово</th></tr></thead>
+                <tbody><tr><td>1</td><td>16</td><td>12</td><td><span class="done" aria-label="Выполнен">✓</span></td></tr><tr><td>2</td><td>18</td><td>10</td><td><span class="done" aria-label="Выполнен">✓</span></td></tr><tr><td>3</td><td>18</td><td>9</td><td><span class="done" aria-label="Выполнен">✓</span></td></tr></tbody>
+              </table>
+            </div>
+            <p class="saved"><span class="window-dot"></span> Результат сохранён</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="feature client" id="client" aria-labelledby="client-title">
+    <div class="wrap feature-grid">
+      <div class="feature-copy">
+        <h2 id="client-title">История тренировок и замеров</h2>
+        <p>Откройте назначенную тренировку и запишите вес и повторения. В дневнике замеров можно вернуться к прошлым записям и сравнить обхваты по датам.</p>
+        <a class="text-link" href="/?register=user">Зарегистрироваться как клиент <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="measurement" data-visual>
+        <div class="measurement-head"><strong>Замеры тела</strong><span>Демо</span></div>
+        <table>
+          <thead><tr><th scope="col">Обхват</th><th scope="col">29 октября</th><th scope="col">19 ноября</th></tr></thead>
+          <tbody><tr><th scope="row">Талия</th><td>91,6 см</td><td>90,2 см</td></tr><tr><th scope="row">Грудь</th><td>104,2 см</td><td>105,8 см</td></tr><tr><th scope="row">Бедро</th><td>57,5 см</td><td>58,4 см</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+  <section class="feature coach" id="coach" aria-labelledby="coach-title">
+    <div class="wrap feature-grid">
+      <div class="feature-copy">
+        <h2 id="coach-title">Планы тренировок для клиентов</h2>
+        <p>Собирайте занятия из библиотеки упражнений, добавляйте инструкции и сохраняйте шаблоны. После занятия откройте отчёт клиента и учтите результаты в следующем назначении.</p>
+        <a class="text-link" href="/?register=coach">Зарегистрироваться как тренер <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="program" data-visual>
+        <div class="measurement-head"><strong>Шаблон тренировки</strong><span>Демо</span></div>
+        <ol>
+          <li><span>Присед с гантелью</span><small>3 × 12</small></li>
+          <li><span>Жим гантелей лёжа</span><small>3 × 10</small></li>
+          <li><span>Тяга гантели к поясу</span><small>3 × 12</small></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+  <section class="closing" aria-labelledby="closing-title">
+    <div class="wrap closing-inner">
+      <h2 id="closing-title">Регистрация в ПланТренировок</h2>
+      <div class="closing-links"><a class="button" href="/?register=user">Создать аккаунт клиента <span aria-hidden="true">↗</span></a><a class="button secondary" href="/?register=coach">Создать аккаунт тренера</a></div>
+    </div>
+  </section>
+</main>
+<footer class="site-footer" id="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-about">
+        <a class="brand" href="#main"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>ПланТренировок</a>
+        <p>Дневник тренировок для клиента и тренера.</p>
+        <ul class="footer-socials" aria-label="Социальные сети и мессенджеры">
+          <li title="MAX"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAwIDEwMDAiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iYiI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDBmIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLW9wYWNpdHk9IjAiLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBpZD0iYSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNGNmIi8+PHN0b3Agb2Zmc2V0PSIuNjYyIiBzdG9wLWNvbG9yPSIjNTNlIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOTNkIi8+PC9saW5lYXJHcmFkaWVudD48bGluZWFyR3JhZGllbnQgaWQ9ImMiIHgxPSIxMTcuODQ3IiB4Mj0iMTAwMCIgeTE9Ijc2MC41MzYiIHkyPSI1MDAiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiBocmVmPSIjYSIvPjxyYWRpYWxHcmFkaWVudCBpZD0iZCIgY3g9Ii04Ny4zOTIiIGN5PSIxMTY2LjExNiIgcj0iNTAwIiBmeD0iLTg3LjM5MiIgZnk9IjExNjYuMTE2IiBncmFkaWVudFRyYW5zZm9ybT0icm90YXRlKDUxLjM1NiAxNTUxLjQ3OCA1NTkuMylzY2FsZSgyLjQyNzAzNDMzIDEpIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaHJlZj0iI2IiLz48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMDAiIGhlaWdodD0iMTAwMCIgZmlsbD0idXJsKCNjKSIgcnk9IjI0OS42ODEiLz48cmVjdCB3aWR0aD0iMTAwMCIgaGVpZ2h0PSIxMDAwIiBmaWxsPSJ1cmwoI2QpIiByeT0iMjQ5LjY4MSIvPjxwYXRoIGZpbGw9IiNmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTUwOC4yMTEgODc4LjMyOGMtNzUuMDA3IDAtMTA5Ljg2NC0xMC45NS0xNzAuNDUzLTU0Ljc1LTM4LjMyNSA0OS4yNzUtMTU5LjY4NiA4Ny43ODMtMTY0Ljk3OSAyMS45IDAtNDkuNDU2LTEwLjk1LTkxLjI0OC0yMy4zNi0xMzYuODczLTE0Ljc4Mi01Ni4yMS0zMS41NzItMTE4LjgwNy0zMS41NzItMjA5LjUwOCAwLTIxNi42MjYgMTc3Ljc1NC0zNzkuNTk3IDM4OC4zNTctMzc5LjU5NyAyMTAuNzg1IDAgMzc1Ljk0NyAxNzEuMDAxIDM3NS45NDcgMzgxLjYwNC43MDcgMjA3LjM0Ni0xNjYuNTk1IDM3Ni4xMTgtMzczLjk0IDM3Ny4yMjRtMy4xMDMtNTcxLjU4NWMtMTAyLjU2NC01LjI5Mi0xODIuNDk5IDY1LjctMjAwLjIwMSAxNzcuMDI0LTE0LjYgOTIuMTYyIDExLjMxNSAyMDQuMzk4IDMzLjM5NyAyMTAuMjM4IDEwLjU4NSAyLjU1NSAzNy4yMy0xOC45OCA1My44MzctMzUuNTg3YTE4OS44IDE4OS44IDAgMCAwIDkyLjcxIDMzLjAzMmMxMDYuMjczIDUuMTEyIDE5Ny4wOC03NS43OTQgMjA0LjIxNS0xODEuOTUgNC4xNTQtMTA2LjM4Mi03Ny42Ny0xOTYuNDg2LTE4My45NTgtMjAyLjU3NFoiIGNsaXAtcnVsZT0iZXZlbm9kZCIvPjwvc3ZnPgo=" alt="MAX" width="22" height="22"></li>
+          <li title="WhatsApp"><svg viewBox="0 0 16 16" fill="#52e889" role="img" aria-label="WhatsApp"><path d="M13.601 2.326A7.85 7.85 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.9 7.9 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.9 7.9 0 0 0 13.6 2.326zM7.994 14.521a6.6 6.6 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.56 6.56 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592m3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.73.73 0 0 0-.529.247c-.182.198-.691.677-.691 1.654s.71 1.916.81 2.049c.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232"/></svg></li>
+          <li title="Telegram"><svg viewBox="0 0 16 16" fill="#72cfff" role="img" aria-label="Telegram"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0M8.287 5.906q-1.168.486-4.666 2.01-.567.225-.595.442c-.03.243.275.339.69.47l.175.055c.408.133.958.288 1.243.294q.39.01.868-.32 3.269-2.206 3.374-2.23c.05-.012.12-.026.166.016s.042.12.037.141c-.03.129-1.227 1.241-1.846 1.817-.193.18-.33.307-.358.336a8 8 0 0 1-.188.186c-.38.366-.664.64.015 1.088.327.216.589.393.85.571.284.194.568.387.936.629q.14.092.27.187c.331.236.63.448.997.414.214-.02.435-.22.547-.82.265-1.417.786-4.486.906-5.751a1.4 1.4 0 0 0-.013-.315.34.34 0 0 0-.114-.217.53.53 0 0 0-.31-.093c-.3.005-.763.166-2.984 1.09"/></svg></li>
+          <li title="VK"><svg viewBox="0 0 24 24" fill="#7db7ff" role="img" aria-label="VK"><path d="m9.489.004.729-.003h3.564l.73.003.914.01.433.007.418.011.403.014.388.016.374.021.36.025.345.03.333.033c1.74.196 2.933.616 3.833 1.516.9.9 1.32 2.092 1.516 3.833l.034.333.029.346.025.36.02.373.025.588.012.41.013.644.009.915.004.98-.001 3.313-.003.73-.01.914-.007.433-.011.418-.014.403-.016.388-.021.374-.025.36-.03.345-.033.333c-.196 1.74-.616 2.933-1.516 3.833-.9.9-2.092 1.32-3.833 1.516l-.333.034-.346.029-.36.025-.373.02-.588.025-.41.012-.644.013-.915.009-.98.004-3.313-.001-.73-.003-.914-.01-.433-.007-.418-.011-.403-.014-.388-.016-.374-.021-.36-.025-.345-.03-.333-.033c-1.74-.196-2.933-.616-3.833-1.516-.9-.9-1.32-2.092-1.516-3.833l-.034-.333-.029-.346-.025-.36-.02-.373-.025-.588-.012-.41-.013-.644-.009-.915-.004-.98.001-3.313.003-.73.01-.914.007-.433.011-.418.014-.403.016-.388.021-.374.025-.36.03-.345.033-.333c.196-1.74.616-2.933 1.516-3.833.9-.9 2.092-1.32 3.833-1.516l.333-.034.346-.029.36-.025.373-.02.588-.025.41-.012.644-.013.915-.009ZM6.79 7.3H4.05c.13 6.24 3.25 9.99 8.72 9.99h.31v-3.57c2.01.2 3.53 1.67 4.14 3.57h2.84c-.78-2.84-2.83-4.41-4.11-5.01 1.28-.74 3.08-2.54 3.51-4.98h-2.58c-.56 1.98-2.22 3.78-3.8 3.95V7.3H10.5v6.92c-1.6-.4-3.62-2.34-3.71-6.92Z"/></svg></li>
+          <li title="OK"><svg viewBox="0 0 24 24" fill="#ffae64" role="img" aria-label="OK"><path d="M12 0a6.2 6.2 0 0 0-6.194 6.195 6.2 6.2 0 0 0 6.195 6.192 6.2 6.2 0 0 0 6.193-6.192A6.2 6.2 0 0 0 12.001 0zm0 3.63a2.567 2.567 0 0 1 2.565 2.565 2.568 2.568 0 0 1-2.564 2.564 2.568 2.568 0 0 1-2.565-2.564 2.567 2.567 0 0 1 2.565-2.564zM6.807 12.6a1.814 1.814 0 0 0-.91 3.35 11.611 11.611 0 0 0 3.597 1.49l-3.462 3.463a1.815 1.815 0 0 0 2.567 2.566L12 20.066l3.405 3.403a1.813 1.813 0 0 0 2.564 0c.71-.709.71-1.858 0-2.566l-3.462-3.462a11.593 11.593 0 0 0 3.596-1.49 1.814 1.814 0 1 0-1.932-3.073 7.867 7.867 0 0 1-8.34 0c-.318-.2-.674-.29-1.024-.278z"/></svg></li>
+          <li title="Дзен"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAABYlAAAWJQFJUiTwAAACHElEQVR4nNXYy4uNcRgH8AcjtyZRNlIWkyG5rFgobFyyQSyEDZGN2MlkIQtRbFxWUhJKZGdjIQpFYqEo93KJhZHQ5DZ89PKrOcOZccbMmXl/n3/gPN/3vL/neX5vRJ1gKtpxKnKExX67EjnC6hTgbuQIm1OAV5Ej7EwBvkSOcECHUZEbnK4I0BS5we2KAIsjJxiEDxUBtkZOMEVnJyInWPdHgEeRE5zxt8mRA4zAxyoBWiIH2KS6JxgSZYYG3Ne1VVFm2KZ7z9AYZYQZaPNvx6JsMAHP1W5HlAWmp1ejpw5i8EAWPjh1nGots1ZXi6nd34UPw3rc0zc+4wia61l0E9YWF3S8Vz+3ivOBuRhZa3HNmI8V2Ijt2FcsYLiOtwbGVzzAeRzCLmxJD3IJZv+6KOGbfLUUAc7iBh6iFT+UVxte4A4uF/9EV6/V2PRhalmarkXIl/1U5Cdcw/60ls/BeAzvq56/q4dDqxbtOIeVNR/eXgYZmp7O6z4o/uSAXfoxJr1e/+NNKS776QK/t4fFP8WkKBMcrrH41rpO3V5eZop23J2iRS+MssK0NEG7cjzKzu+uUk0x8SdG2WFmFwFORy5UX7WXRi6wu8oO0/tVoL9g0R8BLkVOMBrfKwLsidzovPCtidzgYkWAWZEbHK0IMC5yo2PBK9aHhsiNju+k7yJH2JACPI4cYXkKcDNyhHkpwIXIERrTOVhQzx/6CeQPTYLS98yrAAAAAElFTkSuQmCC" alt="Дзен" width="22" height="22"></li>
+          <li title="TikTok"><svg viewBox="0 0 16 16" fill="#ffffff" role="img" aria-label="TikTok"><path d="M9 0h1.98c.144.715.54 1.617 1.235 2.512C12.895 3.389 13.797 4 15 4v2c-1.753 0-3.07-.814-4-1.829V11a5 5 0 1 1-5-5v2a3 3 0 1 0 3 3z"/></svg></li>
+          <li title="Instagram"><svg viewBox="0 0 16 16" fill="#f6a3cd" role="img" aria-label="Instagram"><path d="M8 0C5.829 0 5.556.01 4.703.048 3.85.088 3.269.222 2.76.42a3.9 3.9 0 0 0-1.417.923A3.9 3.9 0 0 0 .42 2.76C.222 3.268.087 3.85.048 4.7.01 5.555 0 5.827 0 8.001c0 2.172.01 2.444.048 3.297.04.852.174 1.433.372 1.942.205.526.478.972.923 1.417.444.445.89.719 1.416.923.51.198 1.09.333 1.942.372C5.555 15.99 5.827 16 8 16s2.444-.01 3.298-.048c.851-.04 1.434-.174 1.943-.372a3.9 3.9 0 0 0 1.416-.923c.445-.445.718-.891.923-1.417.197-.509.332-1.09.372-1.942C15.99 10.445 16 10.173 16 8s-.01-2.445-.048-3.299c-.04-.851-.175-1.433-.372-1.941a3.9 3.9 0 0 0-.923-1.417A3.9 3.9 0 0 0 13.24.42c-.51-.198-1.092-.333-1.943-.372C10.443.01 10.172 0 7.998 0zm-.717 1.442h.718c2.136 0 2.389.007 3.232.046.78.035 1.204.166 1.486.275.373.145.64.319.92.599s.453.546.598.92c.11.281.24.705.275 1.485.039.843.047 1.096.047 3.231s-.008 2.389-.047 3.232c-.035.78-.166 1.203-.275 1.485a2.5 2.5 0 0 1-.599.919c-.28.28-.546.453-.92.598-.28.11-.704.24-1.485.276-.843.038-1.096.047-3.232.047s-2.39-.009-3.233-.047c-.78-.036-1.203-.166-1.485-.276a2.5 2.5 0 0 1-.92-.598 2.5 2.5 0 0 1-.6-.92c-.109-.281-.24-.705-.275-1.485-.038-.843-.046-1.096-.046-3.233s.008-2.388.046-3.231c.036-.78.166-1.204.276-1.486.145-.373.319-.64.599-.92s.546-.453.92-.598c.282-.11.705-.24 1.485-.276.738-.034 1.024-.044 2.515-.045zm4.988 1.328a.96.96 0 1 0 0 1.92.96.96 0 0 0 0-1.92m-4.27 1.122a4.109 4.109 0 1 0 0 8.217 4.109 4.109 0 0 0 0-8.217m0 1.441a2.667 2.667 0 1 1 0 5.334 2.667 2.667 0 0 1 0-5.334"/></svg></li>
+        </ul>
+      </div>
+      <nav aria-label="О сервисе">
+        <h2>Сервис</h2>
+        <ul><li><a href="#client">Клиентам</a></li><li><a href="#coach">Тренерам</a></li><li><a href="/">Войти в кабинет</a></li></ul>
+      </nav>
+      <nav aria-label="Документы сервиса">
+        <h2>Документы</h2>
+        <ul>
+          <li><a href="landing-documents.html#agreement">Пользовательское соглашение</a></li>
+          <li><a href="landing-documents.html#privacy">Политика обработки персональных данных</a></li>
+          <li><a href="landing-documents.html#cookies">Файлы cookie</a></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="footer-downloads" aria-labelledby="footer-app-title">
+      <div>
+        <h2 id="footer-app-title">Приложение</h2>
+        <p>Скачивание пока недоступно.</p>
+      </div>
+      <ul class="footer-stores" aria-label="Площадки">
+        <li>App Store</li>
+        <li>Google Play</li>
+        <li>Яндекс ТВ</li>
+        <li>RuStore</li>
+        <li>Android TV</li>
+      </ul>
+    </div>
+    <div class="footer-bottom">
+      <span>© ПланТренировок</span>
+      <a href="landing-documents.html#owner">Сведения о владельце</a>
+    </div>
+  </div>
+</footer>
+<script type="module" src="landing-motion.js"></script>
+</body>
+</html>
