@@ -173,4 +173,20 @@ footer { background: var(--forest); color: var(--paper); }
 .footer-downloads h2 { font-size: 1rem; line-height: 1.4; }
 .footer-downloads p { margin-top: 4px; color: #c4d3c5; font-size: .875rem; }
 .footer-stores { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.footer-stores li { padding: 7px 12px; border: 1px solid #ffffff35; border-radius: 8px; color: #dce9d9; font-size: .875rem; }
+.footer-stores li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 146px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: #080a09;
+  color: #fff;
+  font-size: .9375rem;
+  font-weight: 600;
+}
+.footer-stores svg, .footer-stores img { width: 24px; height: 24px; flex: 0 0 24px; }
+@media (max-width: 380px) {
+  .footer-stores li { min-width: 132px; padding-inline: 9px; }
+}
