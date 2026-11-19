@@ -249,7 +249,7 @@ DECLARE
 BEGIN
     FOR config IN SELECT * FROM (VALUES
         ('users', 'Учётные записи', 'email,phone,birth_date,surname,given_name,patronymic,communication_languages,location_country,location_city,profile_media,coach_bio,coach,is_del'),
-        ('exercises', 'Упражнения', 'name,instruction,media,gallery,moderation_status'),
+        ('exercises', 'Упражнения', 'name,instruction,instruction_format,media,gallery,moderation_status'),
         ('exercise_tags', 'Упражнения', 'tag_id'),
         ('workouts', 'Тренировки', 'title,client,coach,items,details'),
         ('results', 'Результаты тренировок', 'payload'),
@@ -371,3 +371,5 @@ $$;
 DROP TRIGGER IF EXISTS workoutplan_award_measurement_stars ON body_measurements;
 CREATE TRIGGER workoutplan_award_measurement_stars AFTER INSERT ON body_measurements
 FOR EACH ROW EXECUTE FUNCTION workoutplan_award_measurement_stars();
+
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS instruction_format TEXT NOT NULL DEFAULT 'text' CHECK (instruction_format IN ('text','html'));

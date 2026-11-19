@@ -12,6 +12,7 @@ if not DATABASE_URL:
     raise RuntimeError('DATABASE_URL is required for PostgreSQL')
 
 import postgres_backend
+from rich_text import validate_instruction
 
 INTEGRITY_ERRORS = (postgres_backend.psycopg.IntegrityError,)
 
@@ -143,7 +144,8 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copyfileobj(source, self.wfile)
             return
         path=ROOT/'web'/('index.html' if self.path=='/' else self.path.lstrip('/'))
-        if path.parent != ROOT/'web' or not path.is_file():self.send_error(404);return
+        vendor_asset = self.path in ('/vendor/quill/quill.js', '/vendor/quill/quill.snow.css')
+        if (path.parent != ROOT/'web' and not vendor_asset) or not path.is_file():self.send_error(404);return
         self.send_response(200);self.send_header('Content-Type',{'html':'text/html; charset=utf-8','css':'text/css','js':'text/javascript; charset=utf-8'}.get(path.suffix[1:],'text/plain'));self.end_headers();self.wfile.write(path.read_bytes())
     def do_POST(self):
         if self.path != '/api/upload':
@@ -522,6 +524,12 @@ class Handler(BaseHTTPRequestHandler):
                                    WHERE photo->>'type' = 'photo' AND COALESCE(photo->>'url', '') <> ''
                                ) OR split_part(split_part(media, chr(63), 1), '#', 1)
                                  ~* '[.](jpg|jpeg|png|webp|gif|avif)$') AS with_photo,
+                               count(*) FILTER (WHERE regexp_replace(
+                                   CASE WHEN instruction_format='html' THEN
+                                       regexp_replace(coalesce(instruction,''), '<[^>]*>|&nbsp;|&#160;|&#[xX]0*[aA]0;', '', 'g')
+                                   ELSE coalesce(instruction,'') END,
+                                   '[[:space:]' || chr(160) || chr(8203) || chr(8204) || chr(8205) || chr(65279) || ']', '', 'g'
+                               ) <> '') AS with_description,
                                count(*) FILTER (WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '1 month') AS recent,
                                count(*) FILTER (WHERE created_at IS NULL) AS unknown_dates
                         FROM exercises
@@ -762,6 +770,8 @@ class Handler(BaseHTTPRequestHandler):
                     if not updated.rowcount:
                         return self.respond(409, {'error':'Client unavailable'})
                 elif self.path=='/api/exercises' and role in ('admin','coach'):
+                    instruction_format = body.get('instruction_format', 'text')
+                    instruction = validate_instruction(body.get('instruction',''), instruction_format)
                     name=body['name'].strip(); media=body.get('media','')
                     if not name or (media and not media.startswith('https://')):raise ValueError('Укажите название и HTTPS-ссылку на медиа')
                     gallery = body.get('gallery', [])
@@ -784,15 +794,15 @@ class Handler(BaseHTTPRequestHandler):
                         if role == 'coach' and (exercise['created_by'] != uid or exercise['moderation_status'] != 'draft'):
                             return self.respond(403, {'error':'Можно редактировать только свои черновики'})
                         if 'gallery' in body:
-                            c.execute('UPDATE exercises SET name=?,instruction=?,media=?,gallery=? WHERE id=?',
-                                      (name,body.get('instruction',''),media,json.dumps(gallery),int(body['id'])))
+                            c.execute('UPDATE exercises SET name=?,instruction=?,instruction_format=?,media=?,gallery=? WHERE id=?',
+                                      (name,instruction,instruction_format,media,json.dumps(gallery),int(body['id'])))
                         else:
-                            c.execute('UPDATE exercises SET name=?,instruction=? WHERE id=?',
-                                      (name,body.get('instruction',''),int(body['id'])))
+                            c.execute('UPDATE exercises SET name=?,instruction=?,instruction_format=? WHERE id=?',
+                                      (name,instruction,instruction_format,int(body['id'])))
                     else:
                         exercise_id = c.execute(
-                            'INSERT INTO exercises(name,instruction,media,gallery,created_by,moderation_status) VALUES(?,?,?,?,?,?) RETURNING id',
-                            (name,body.get('instruction',''),media,json.dumps(gallery),uid,'draft' if role=='coach' else 'approved')).fetchone()['id']
+                            'INSERT INTO exercises(name,instruction,instruction_format,media,gallery,created_by,moderation_status) VALUES(?,?,?,?,?,?,?) RETURNING id',
+                            (name,instruction,instruction_format,media,json.dumps(gallery),uid,'draft' if role=='coach' else 'approved')).fetchone()['id']
                     if 'tag_ids' in body:
                         tag_ids = body['tag_ids']
                         if not isinstance(tag_ids, list) or any(type(tag) is not int for tag in tag_ids):

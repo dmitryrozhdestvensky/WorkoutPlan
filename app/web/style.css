@@ -432,3 +432,28 @@ button.action-with-icon.theme-danger:hover:not(:disabled) { background: #931a2a;
 .measurement-reward-stars { display:flex; gap:10px; color:#c89418; font-size:32px; }
 .measurement-reward-dialog .dialog-footer { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:12px; padding:20px 24px; border-top:1px solid #e5e7e5; }
 .measurement-reward-dialog .dialog-footer button { margin:0; }
+
+.instruction-editor .ql-toolbar { border:1px solid #b9c6b9; border-radius:6px 6px 0 0; background:#f7f8f5; font-family:inherit; }
+.instruction-editor .ql-container { border:1px solid #b9c6b9; border-radius:0 0 6px 6px; font:inherit; }
+.instruction-editor .ql-editor { min-height:200px; max-height:500px; overflow-y:auto; line-height:1.6; }
+.instruction-editor .ql-toolbar button { border-radius:3px; margin:0; padding:3px 5px; font-weight:normal; background:transparent; color:#172a24; }
+.instruction-editor .ql-toolbar .ql-picker { color:#172a24; }
+.instruction-editor .ql-toolbar .ql-picker-label::before { content:'Обычный текст'; }
+.instruction-editor .ql-toolbar .ql-picker-item::before { content:'Обычный текст'; }
+.instruction-editor .ql-toolbar .ql-picker-label[data-value="2"]::before,.instruction-editor .ql-toolbar .ql-picker-item[data-value="2"]::before { content:'Заголовок 2'; }
+.instruction-editor .ql-toolbar .ql-picker-label[data-value="3"]::before,.instruction-editor .ql-toolbar .ql-picker-item[data-value="3"]::before { content:'Заголовок 3'; }
+.instruction-editor .ql-toolbar .ql-picker.ql-header { width:145px; }
+.instruction-editor .ql-toolbar select { width:auto; }
+.instruction-editor .ql-editor[aria-invalid="true"] { outline:2px solid #a12626; outline-offset:-2px; }
+.rich-text-content { overflow-wrap:anywhere; }
+.rich-text-content p { margin:0 0 .65em; }
+.rich-text-content ul,.rich-text-content ol { padding-left:1.5em; }
+.rich-text-content blockquote { border-left:3px solid #b9c6b9; padding-left:14px; margin-left:0; }
+
+.exercise-list-tags.exercise-list-tags-spaced { margin-top:1.5rem; }
+
+.exercise-library-table .exercise-list-tags .description-status.theme-success { background:#d1e7dd; color:#0a4b2e; }
+.exercise-library-table .exercise-list-tags .description-status.theme-warning { background:#ffe0b2; color:#7a3600; }
+
+.exercise-library-table .exercise-list-tags .description-status { display:inline-flex; align-items:center; gap:6px; }
+.exercise-library-table .description-status svg { flex-shrink:0; }

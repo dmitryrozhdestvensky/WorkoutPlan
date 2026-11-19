@@ -18,7 +18,7 @@ function showExerciseCreate(fields = {}, details = {}, references = null) {
         </div>
         <div class="mb-3">
           <label for="exercise-instruction" class="form-label">Техника выполнения</label>
-          <textarea id="exercise-instruction" class="form-control" name="instruction" rows="5" required>${esc(fields.instruction)}</textarea>
+          <textarea id="exercise-instruction" class="form-control" name="instruction" rows="5">${esc(fields.instruction)}</textarea>
         </div>
         ${references ? exerciseTagFields(references, fields.tag_ids || []) : ''}
         ${canModerate || readOnly ? '' : `<button type="submit">${editing ? 'Сохранить изменения' : state.user.role === 'coach' ? 'Сохранить черновик' : 'Добавить в библиотеку'}</button>`}
@@ -49,11 +49,12 @@ function showExerciseCreate(fields = {}, details = {}, references = null) {
     </section>` : ''}`;
   adminBreadcrumb('Упражнения', title);
   const form = $('#exerciseForm');
+  const instructionEditor = mountInstructionEditor($('#exercise-instruction'), fields, readOnly);
   const readFields = () => {
     const data = new FormData(form);
     return {
       name:data.get('name'),
-      instruction:data.get('instruction'),
+      ...instructionEditor.read(),
       ...(canModerate && data.has('moderation_status') ? {moderation_status:data.get('moderation_status')} : {}),
       ...(canSubmit ? {submit_for_moderation:data.has('submit_for_moderation')} : {}),
       ...(references ? {tag_ids:data.getAll('tag_ids').map(Number)} : {})
@@ -89,7 +90,7 @@ function showExerciseCreate(fields = {}, details = {}, references = null) {
   }
   form.onsubmit = event => {
     event.preventDefault();
-    if (readOnly) return;
+    if (readOnly || !instructionEditor.valid()) return;
     const values = readFields();
     run(async () => {
       await api('exercises', {...values, ...(editing ? {id:fields.id} : {}), ...(details.changed ? {gallery:details.gallery,cover:details.cover} : {})});
